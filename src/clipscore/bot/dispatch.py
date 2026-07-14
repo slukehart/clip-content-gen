@@ -10,7 +10,7 @@ from clipscore.jobs.poll import run_once
 from clipscore.scoring.board import eligible_latest_scores
 from clipscore.bot.notify import select_alerts, compute_movers
 from clipscore.bot.state import record_alert
-from clipscore.bot.messages import format_alert, format_top, format_summary
+from clipscore.bot.messages import format_alert, format_summary
 
 log = structlog.get_logger()
 
@@ -54,7 +54,7 @@ def dispatch_summary(session: Session, notifier: Notifier, now_iso: str | None =
     try:
         notifier.send(text)
     except Exception:
-        log.warning("summary_send_failed")
+        log.exception("summary_send_failed")
         return {"summary_sent": False}
     return {"summary_sent": True}
 
