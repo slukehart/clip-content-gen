@@ -74,3 +74,14 @@ def test_normalize_maps_fields():
     assert up.snapshot.active_clippers == 10
     assert up.snapshot.success_rate == 26.0
     assert up.allowed_socials == ["tiktok", "instagram"]
+    # URL points at the real Whop product page, NOT contentrewards.com/discover/<route>
+    # (that path has no per-campaign page; it serves a soft-404). See 2026-07-14 bug.
+    assert up.url == "https://whop.com/slug"
+
+
+def test_normalize_url_falls_back_to_discover_when_no_route():
+    ing = ContentrewardsIngester()
+    raw = {"id": "abc", "whopExperienceId": "exp_1", "title": "T",
+           "status": "active", "stats": {}}  # no whopProductRoute
+    up = ing.normalize(raw)
+    assert up.url == "https://contentrewards.com/discover"

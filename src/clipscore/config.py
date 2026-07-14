@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     enable_playwright: bool = False
     source_base_url: str = "https://contentrewards.com"
     discover_path: str = "/discover"
+    # Campaign detail pages live on Whop, not under contentrewards.com/discover/<route>
+    # (that path serves a soft-404). Links are built as {whop_base_url}/{whopProductRoute}.
+    whop_base_url: str = "https://whop.com"
     user_agent: str = "clipscore/0.1 (+personal research; contact via repo)"
     http_timeout_s: int = 60
 

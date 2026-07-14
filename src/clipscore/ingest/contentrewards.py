@@ -24,6 +24,7 @@ class ContentrewardsIngester(BaseIngester):
         s = get_settings()
         self._base = s.source_base_url
         self._path = s.discover_path
+        self._whop = s.whop_base_url
         self._ua = s.user_agent
         self._timeout = s.http_timeout_s
         self._client = client
@@ -75,7 +76,7 @@ class ContentrewardsIngester(BaseIngester):
         category = raw.get("category")
         niche = category.strip().lower() if isinstance(category, str) and category.strip() else None
         route = raw.get("whopProductRoute")
-        url = f"{self._base}{self._path}/{route}" if route else self._discover_url()
+        url = f"{self._whop}/{route}" if route else self._discover_url()
         return CampaignUpsert(
             source=self.source_name,
             external_id=raw["id"],
