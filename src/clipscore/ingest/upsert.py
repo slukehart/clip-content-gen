@@ -43,10 +43,11 @@ def upsert_campaign(session: Session, up: CampaignUpsert, seen_at: str) -> Campa
         campaign.last_seen_at = seen_at
 
     # apply mutable fields
-    for field in ("title", "niche", "cpm_usd", "platform_fee_pct", "cap_per_post_usd",
-                  "cap_provenance", "min_payout_threshold_usd", "min_views_threshold",
-                  "budget_total_usd", "allowed_socials", "requirements_raw", "status",
-                  "is_verified", "whop_experience_id", "whop_product_route", "url", "brand"):
+    for field in ("title", "niche", "campaign_type", "cpm_usd", "platform_fee_pct",
+                  "cap_per_post_usd", "cap_provenance", "min_payout_threshold_usd",
+                  "min_views_threshold", "budget_total_usd", "allowed_socials",
+                  "requirements_raw", "status", "is_verified", "whop_experience_id",
+                  "whop_product_route", "url", "brand"):
         setattr(campaign, field, getattr(up, field))
 
     session.flush()  # ensure campaign.id available
