@@ -23,6 +23,17 @@ def test_mover_delta_uses_past_ge_24h(session):
     m = compute_movers(session, iso(NOW))
     assert len(m) == 1 and abs(m[0]["delta"] - 0.6) < 1e-9       # 0.9 - 0.3
 
+def test_past_endpoint_is_closest_not_oldest(session):
+    # TWO rows are >=24h old; the past endpoint must be the one CLOSEST to now-24h
+    # (the 30h row, 0.3), NOT the oldest (the 40h row, 0.1). A regression to
+    # ORDER BY scored_at ASC (oldest) would give delta 0.8, not 0.6.
+    _camp(session, "a")
+    _score(session, "a", 0.1, iso(NOW - timedelta(hours=40)))   # oldest <= cutoff
+    _score(session, "a", 0.3, iso(NOW - timedelta(hours=30)))   # closest <= cutoff  <- must win
+    _score(session, "a", 0.9, iso(NOW))                          # current
+    m = compute_movers(session, iso(NOW))
+    assert len(m) == 1 and abs(m[0]["delta"] - 0.6) < 1e-9       # 0.9 - 0.3, not 0.9 - 0.1
+
 def test_young_campaign_excluded(session):
     _camp(session, "b")
     _score(session, "b", 0.5, iso(NOW - timedelta(hours=2)))    # no score >=24h old
