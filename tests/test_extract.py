@@ -20,3 +20,8 @@ def test_absent_when_none_or_no_match():
         assert r["cap_provenance"] == "absent"
         assert r["min_views_threshold"] is None
         assert r["min_payout_threshold_usd"] is None
+
+def test_aggregate_budget_not_treated_as_per_post_cap():
+    r = extract_requirements("Program budget cap: $50,000. Rate is $0.10 per 1,000 views.")
+    assert r["cap_per_post_usd"] is None
+    assert r["cap_provenance"] == "absent"

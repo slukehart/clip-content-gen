@@ -4,7 +4,7 @@ partial by design: no match => provenance 'absent' (NOT 'uncapped')."""
 import re
 from clipscore.ingest.coerce import money_to_float, views_to_int
 
-_CAP = re.compile(r"(?:max|cap|up to|maximum)\D{0,15}\$\s?([\d,]+(?:\.\d+)?)\s*(?:/|per)?\s*(?:video|post|clip)?", re.I)
+_CAP = re.compile(r"(?:max|cap|up to|maximum)\D{0,15}\$\s?([\d,]+(?:\.\d+)?)\s*(?:/\s*|per\s+)(?:video|post|clip)", re.I)
 _MIN_VIEWS = re.compile(r"(?:min(?:imum)?(?:\s+floor)?|floor|at least)\D{0,15}?([\d,]+)\s*views", re.I)
 _MIN_PAYOUT = re.compile(r"min(?:imum)?\s+payout\D{0,10}\$\s?([\d,]+(?:\.\d+)?)", re.I)
 
