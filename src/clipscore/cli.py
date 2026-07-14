@@ -33,7 +33,7 @@ def _setup(args) -> None:
 
 
 def _poll(args) -> None:
-    get_engine()
+    get_engine()  # binds SessionLocal to the configured engine (side effect)
     with SessionLocal() as s:
         print(run_once(s))
 
