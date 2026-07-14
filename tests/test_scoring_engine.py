@@ -68,6 +68,7 @@ def test_zero_cpm_flagged_and_excluded_from_percentile(session):
     rows = {r.campaign_id: r for r in session.execute(select(CampaignScore)).scalars()}
     assert rows["z"].cvs_raw == 0.0
     assert rows["z"].cvs_niche_percentile is None      # excluded from population
+    assert rows["z"].p_threshold == 0.0 and rows["z"].p_approval == 0.0 and rows["z"].p_payout == 0.0
     assert rows["g"].cvs_niche_percentile == pytest.approx(1.0)  # sole valid in niche
 
 def test_missing_cpm_flagged(session):
@@ -98,6 +99,17 @@ def test_percentile_within_niche(session):
     assert rows["hi"].cvs_raw > rows["lo"].cvs_raw
     assert rows["hi"].cvs_niche_percentile == pytest.approx(1.0)
     assert rows["lo"].cvs_niche_percentile == pytest.approx(0.5)
+
+def test_multi_niche_no_cross_contamination(session):
+    _seed_refs(session)
+    session.add(NicheBaseline(niche="music", e_views_median=8000, p_threshold=0.55))
+    session.commit()
+    _campaign(session, "gm", niche="gaming", cpm_usd=2.0); _snap(session, "gm", 500.0)
+    _campaign(session, "ms", niche="music", cpm_usd=2.0); _snap(session, "ms", 500.0)
+    score_all(session)
+    rows = {r.campaign_id: r for r in session.execute(select(CampaignScore)).scalars()}
+    assert rows["gm"].cvs_niche_percentile == pytest.approx(1.0)
+    assert rows["ms"].cvs_niche_percentile == pytest.approx(1.0)
 
 def test_components_persisted(session):
     _seed_refs(session)

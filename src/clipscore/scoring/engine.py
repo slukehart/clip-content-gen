@@ -30,9 +30,7 @@ def score_all(session: Session, now_iso: str | None = None) -> dict:
     now_iso = now_iso or utcnow_iso()
     settings = get_settings()
 
-    campaigns = session.execute(
-        select(Campaign).where(Campaign.source == "contentrewards")
-    ).scalars().all()
+    campaigns = session.execute(select(Campaign)).scalars().all()
 
     baselines = {b.niche: b for b in session.execute(select(NicheBaseline)).scalars().all()}
     trust = {t.source: t for t in session.execute(select(PlatformTrust)).scalars().all()}
@@ -65,8 +63,8 @@ def score_all(session: Session, now_iso: str | None = None) -> dict:
             log.warning("zero_or_missing_cpm", campaign_id=c.id, cpm=c.cpm_usd)
             res["zero_cpm"] += 1
             rec = dict(campaign_id=c.id, net_cpm=0.0, capped_earnings=0.0,
-                       p_threshold=base.p_threshold, p_approval=settings.default_p_approval,
-                       p_payout=p_payout, budget_health=0.0, sat_factor=0.0,
+                       p_threshold=0.0, p_approval=0.0,
+                       p_payout=0.0, budget_health=0.0, sat_factor=0.0,
                        ev_per_clip=0.0, cvs_raw=0.0)
             pending.append((rec, niche_key, None))   # None -> excluded from percentile
             res["scored"] += 1
