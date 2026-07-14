@@ -30,6 +30,14 @@ class Campaign(Base):
     is_verified: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     first_seen_at: Mapped[str] = mapped_column(String)
     last_seen_at: Mapped[str] = mapped_column(String)
+    content_bank_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_creator: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_platforms: Mapped[str | None] = mapped_column(String, nullable=True)
+    clip_min_len_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    clip_max_len_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    caption_rules: Mapped[str | None] = mapped_column(String, nullable=True)
+    banned_content: Mapped[str | None] = mapped_column(String, nullable=True)
+    extract_provenance: Mapped[str | None] = mapped_column(String, nullable=True)
 
 class CampaignSnapshot(Base):
     __tablename__ = "campaign_snapshots"
@@ -104,3 +112,51 @@ class Alert(Base):
     niche: Mapped[str | None] = mapped_column(String, nullable=True)
     cvs_niche_percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
     alerted_at: Mapped[str] = mapped_column(String)
+
+class ClipJob(Base):
+    __tablename__ = "clip_jobs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[str] = mapped_column(String, index=True)
+    source_type: Mapped[str] = mapped_column(String)
+    source_ref: Mapped[str] = mapped_column(String)
+    status: Mapped[str] = mapped_column(String)
+    est_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[str] = mapped_column(String)
+
+class SourceAsset(Base):
+    __tablename__ = "source_assets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    clip_job_id: Mapped[int] = mapped_column(Integer, index=True)
+    creator: Mapped[str | None] = mapped_column(String, nullable=True)
+    platform: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    authorizing_campaign_id: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    storage_uri: Mapped[str | None] = mapped_column(String, nullable=True)
+    duration_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    downloaded_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+class Clip(Base):
+    __tablename__ = "clips"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_asset_id: Mapped[int] = mapped_column(Integer, index=True)
+    platform_variant: Mapped[str | None] = mapped_column(String, nullable=True)
+    storage_uri: Mapped[str | None] = mapped_column(String, nullable=True)
+    duration_s: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    transcript: Mapped[str | None] = mapped_column(String, nullable=True)
+    engine: Mapped[str | None] = mapped_column(String, nullable=True)
+    engine_clip_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String)
+    created_at: Mapped[str] = mapped_column(String)
+
+class ClipMatch(Base):
+    __tablename__ = "clip_matches"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    clip_id: Mapped[int] = mapped_column(Integer, index=True)
+    campaign_id: Mapped[str] = mapped_column(String, index=True)
+    match_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    meets_requirements: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    suggested_caption: Mapped[str | None] = mapped_column(String, nullable=True)
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
