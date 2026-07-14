@@ -16,8 +16,9 @@ full pitch; the two design docs below are the source of truth for architecture.
   For approved campaigns, acquires source footage, sends it to a hosted clipping engine,
   matches finished clips back to live campaigns, and presents a local review dashboard.
 
-**Status:** early build. Stage 1 (foundation: DB models, migrations, ingest scaffolding)
-is in progress under [`plans/`](plans/).
+**Status:** Pipeline A Stages 1–4 are merged (foundation, ingester, scoring, Discord bot —
+see [`plans/`](plans/)). The bot runs end-to-end (`clipscore bot`). Pipeline B is not yet
+started.
 
 ## Non-negotiable principles
 
@@ -35,7 +36,8 @@ These are product constraints, not preferences — do not violate them when writ
 ## Tech stack
 
 Python 3.11+ · SQLite (WAL) · SQLAlchemy 2.x + Alembic · pydantic-settings · structlog ·
-pytest / pytest-asyncio. (Planned, not yet wired: APScheduler, httpx, discord.py, FastAPI.)
+pytest / pytest-asyncio · APScheduler + discord.py (Pipeline A Stage 4, wired).
+(Planned, not yet wired: httpx, FastAPI.)
 
 ## Repository layout
 
@@ -64,6 +66,47 @@ alembic revision --autogenerate -m "msg"   # new migration
 
 Tests use `pythonpath = ["src"]` (see `pyproject.toml`), so `import clipscore` works without
 installing. `tests/conftest.py` registers the ORM models and creates tables for fixtures.
+
+The installed entrypoint is a single CLI (`[project.scripts]` → `clipscore.cli:main`):
+
+```bash
+clipscore setup          # create tables + load seeds (platform_trust, niche_baselines)
+clipscore poll           # one ingest+score cycle against the configured DB
+clipscore rank [--top N] [--niche X]   # ranked CLI output
+clipscore smoke [db]     # live capture check into a throwaway DB
+clipscore bot            # run the Discord bot (see below)
+```
+
+## Running the Discord bot
+
+Pipeline A Stage 4. Decision logic (alert selection, dedup, formatting, movers) lives in
+`src/clipscore/bot/` and is fully CI-tested with a fake notifier; `bot/discord_bot.py` is a
+thin `discord.py` adapter that is manual-acceptance-only (real token + network, never in CI).
+`clipscore bot` connects, syncs the `/top` slash command, and schedules the poll+alert cycle
+and the daily 9am-ET summary. A Discord failure can never break ingest/scoring.
+
+**Env vars (in `.env`, `CLIPSCORE_` prefix):**
+
+| Var | Required | Purpose |
+|-----|----------|---------|
+| `CLIPSCORE_DISCORD_TOKEN` | yes | Bot token from the Developer Portal → **Bot → Reset Token**. |
+| `CLIPSCORE_DISCORD_ALERT_CHANNEL_ID` | for alerts | **Channel** ID (not the application ID) where alerts + daily summary post. If unset, sends silently no-op; `/top` still works. Get it via Discord client → Developer Mode → right-click channel → Copy Channel ID. |
+| `CLIPSCORE_ALERT_PERCENTILE` (0.90), `CLIPSCORE_MIN_NICHE_SAMPLE` (5), `CLIPSCORE_SUMMARY_HOUR_ET` (9), `CLIPSCORE_POLL_INTERVAL_MINUTES` (45) | no | Tuning; defaults in `config.py`. |
+
+The bot uses `discord.Intents.default()` — **no privileged intents** (do not enable Message
+Content / Members / Presence). Install to a server with the OAuth2 scopes `bot` +
+`applications.commands` and the **View Channels** + **Send Messages** permissions.
+
+**macOS SSL gotcha (bites first run on a fresh machine):** python.org's Python ships with no
+CA bundle wired to OpenSSL, so the bot's HTTPS connection to `discord.com` fails with
+`SSLCertVerificationError: CERTIFICATE_VERIFY_FAILED — unable to get local issuer certificate`.
+This is **not** a bad token — it reaches the host and fails only on cert verification. Fix once
+per Python install:
+
+```bash
+"/Applications/Python 3.12/Install Certificates.command"
+# verify: python3 -c "import ssl; print(ssl.get_default_verify_paths().cafile)"  # must be non-None + exist
+```
 
 ## Configuration & secrets
 
