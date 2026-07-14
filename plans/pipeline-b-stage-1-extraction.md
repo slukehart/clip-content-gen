@@ -31,7 +31,7 @@ This is **Phase B1** of `PIPELINE_B_CLIP_FACTORY.md` (source of truth — see it
 
 Every task's requirements implicitly include these.
 
-- **Honest coverage (the core discipline).** Every extracted field is nullable and carries a source in `extract_provenance` (JSON: field → `"description" | "whop_page" | "regex" | "allowed_socials" | "absent"`). `allowed_socials` specifically marks a field **defaulted from A's ingested `allowed_socials` field, NOT read from brief text** — do not mislabel a default as `description` (CLAUDE.md: "track observed vs. guessed factors separately"). A field is NEVER populated without recording where it came from. **Absent ≠ empty**: "no cap found" is `absent`, not `0`. This is A's `cap_provenance` rule, generalized.
+- **Honest coverage (the core discipline).** Every extracted field is nullable and carries its **source** in `extract_provenance` (JSON: field → `"description" | "whop_page" | "allowed_socials" | "absent"`). Provenance records **where the value came from, not which extractor found it** — a value read from the brief is `description` whether regex or the LLM pulled it (the regex-vs-LLM floor/ceiling comparison is a coverage-report concern, Task 4, not a per-field label). `allowed_socials` specifically marks a field **defaulted from A's ingested `allowed_socials` field, NOT read from brief text** — do not mislabel a default as `description` (CLAUDE.md: "track observed vs. guessed factors separately"). A field is NEVER populated without recording where it came from. **Absent ≠ empty**: "no cap found" is `absent`, not `0`. This is A's `cap_provenance` rule, generalized.
 - **Extraction never breaks Pipeline A.** Extraction runs *after* A's ingest/upsert as a separate, guarded step. No API key, an LLM timeout/error, or a blocked Whop fetch → fall back to the regex/description-only floor, log, and continue. Ingest/scoring must return normally regardless. (Same "a Discord failure can never break ingest/scoring" guard as Stage 4.)
 - **No new required secret.** The system runs with `CLIPSCORE_LLM_API_KEY` unset — it simply uses the regex floor. The LLM adapter is opt-in.
 - **Compliance on the Whop fetch.** Honest `user_agent`; check `whop.com/robots.txt` (cached per run) before fetching a product page; a block/challenge/non-200 → `classify_response` → **log and skip** (fall back to description-only), **never circumvent**. Modest pacing; one page per campaign; short cache.
@@ -126,7 +126,7 @@ def test_migration_adds_pipeline_b_schema(tmp_path):
 **Interfaces:**
 - Produces: `ExtractedTargets` (pydantic: the 7 fields above + `provenance: dict[str,str]`); `BaseExtractor` protocol (`extract(description, page_text|None, base_platforms) -> ExtractedTargets`); `RegexExtractor` (deterministic — reuses `ingest/extract.py` patterns + adds a Drive/URL pattern for `content_bank_url` and an `@handle` pattern for `target_creator`); `merge_extractions(regex, llm, base_platforms) -> ExtractedTargets` (LLM wins per-field when present, else regex, else absent; provenance records the winning source); `apply_to_campaign(campaign, extracted)` (writes columns + `extract_provenance` JSON).
 
-- [ ] **Step 1: Write the failing tests** — cover: `content_bank_url` pulled from a Google-Drive URL in text (provenance `regex`/`description`); `@handle` → `target_creator`; no match → field `None` + provenance `absent`; `target_platforms` defaults to `base_platforms` (`allowed_socials`) when the brief is silent; `merge_extractions` prefers a non-null LLM field over regex and tags provenance `whop_page` when the value came only from `page_text`; `apply_to_campaign` serializes arrays to JSON and writes a provenance dict covering all 7 fields.
+- [ ] **Step 1: Write the failing tests** — cover: `content_bank_url` pulled from a Google-Drive URL in text (provenance `description`); `@handle` → `target_creator`; no match → field `None` + provenance `absent`; `target_platforms` defaults to `base_platforms` (`allowed_socials`) when the brief is silent (provenance `allowed_socials`); `merge_extractions` prefers a non-null LLM field over regex and tags provenance `whop_page` when the value came only from `page_text`; `apply_to_campaign` serializes arrays to JSON and writes a provenance dict covering all 7 fields.
 
 ```python
 # tests/test_factory_extract.py (representative)
@@ -138,7 +138,7 @@ def test_regex_pulls_drive_bank_and_handle():
     e = RegexExtractor().extract(d, None, ["tiktok"])
     assert e.content_bank_url == "https://drive.google.com/drive/folders/AbC"
     assert "@diego" in e.target_creator
-    assert e.provenance["content_bank_url"] in ("regex", "description")
+    assert e.provenance["content_bank_url"] == "description"
 
 def test_platforms_default_to_base_when_silent():
     e = RegexExtractor().extract("Clip our stuff.", None, ["tiktok", "instagram"])
@@ -155,9 +155,9 @@ def test_merge_prefers_llm_and_tags_whop_page():
 def test_apply_writes_json_and_provenance(session):
     c = Campaign(source="cr", external_id="x", url="u", status="active")
     apply_to_campaign(c, ExtractedTargets(target_creator=["@a"], target_platforms=["tiktok"],
-                                          provenance={"target_creator": "regex"}))
+                                          provenance={"target_creator": "description"}))
     assert c.target_creator == '["@a"]'
-    assert '"target_creator": "regex"' in c.extract_provenance
+    assert '"target_creator": "description"' in c.extract_provenance
 ```
 
 - [ ] **Step 2: Run to verify they fail.**
