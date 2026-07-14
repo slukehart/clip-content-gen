@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     hours_per_clip: float = 0.75
     raw_retention_days: int = 14
     discord_token: str | None = None
+    alert_percentile: float = 0.90
+    min_niche_sample: int = 5
+    discord_alert_channel_id: int | None = None
+    summary_hour_et: int = 9
     enable_playwright: bool = False
     source_base_url: str = "https://contentrewards.com"
     discover_path: str = "/discover"
