@@ -40,6 +40,19 @@ def test_robots_disallow_raises_halt():
         ContentrewardsIngester(client=_client(handler)).fetch()
     assert ei.value.event_type == "robots_disallow"
 
+def test_robots_ua_specific_disallow_not_overridden_by_wildcard():
+    # A UA-specific Disallow must be honored even when the wildcard group Allows.
+    # (Regression guard for the robots OR-logic fix: raising must not require the
+    # wildcard group to ALSO disallow.)
+    robots = "User-Agent: clipscore\nDisallow: /discover\n\nUser-Agent: *\nAllow: /discover\n"
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(200, text=robots)
+        return httpx.Response(200, text=FIX)
+    with pytest.raises(SourceHalted) as ei:
+        ContentrewardsIngester(client=_client(handler)).fetch()
+    assert ei.value.event_type == "robots_disallow"
+
 def test_normalize_maps_fields():
     ing = ContentrewardsIngester()
     raw = {"id": "abc", "whopExperienceId": "exp_1", "whopProductRoute": "slug",
