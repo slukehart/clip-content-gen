@@ -22,6 +22,13 @@ def ranked_rows(session: Session, top: int | None = None, niche: str | None = No
         c = camps.get(s.campaign_id)
         if c is None:
             continue
+        # Only currently-eligible campaigns belong on the board. A campaign's last
+        # score row persists after it leaves eligibility (ended/walled/UGC), so
+        # without this filter the board would show stale campaigns ranked against a
+        # population they are no longer part of. Active campaigns are re-scored every
+        # ok cycle, so their latest score is always fresh.
+        if c.status != "active" or c.access_status != "ingestable" or c.campaign_type == "ugc":
+            continue
         key = c.niche or "other"
         if niche is not None and key != niche:
             continue

@@ -47,6 +47,25 @@ def test_format_table_carries_caveat(session):
     assert "estimated screening signal, not a payout prediction" in out
     assert "$/hr" not in out
 
+def test_stale_ineligible_campaigns_excluded(session):
+    # A campaign keeps its last score row after it ends/goes walled/is UGC. The board
+    # must NOT surface those stale rows — only currently-eligible campaigns appear.
+    _camp(session, "live", niche="gaming")
+    _camp(session, "ended", niche="gaming"); _camp(session, "walled", niche="gaming")
+    _camp(session, "ugc", niche="gaming")
+    # flip the ineligible ones
+    from sqlalchemy import select as _sel
+    from clipscore.db.models import Campaign as _C
+    for cid, field, val in (("ended", "status", "ended"),
+                            ("walled", "access_status", "tos_restricted"),
+                            ("ugc", "campaign_type", "ugc")):
+        obj = session.get(_C, cid); setattr(obj, field, val)
+    session.commit()
+    for cid in ("live", "ended", "walled", "ugc"):
+        _score(session, cid, 5.0, 0.9, "2026-07-13T00:00:00Z")
+    rows = ranked_rows(session)
+    assert [r["campaign_id"] for r in rows] == ["live"]
+
 def test_none_percentile_sorts_last(session):
     # zero-cpm campaigns get a score row with cvs_niche_percentile=None (excluded
     # from the percentile population) — a genuinely reachable state. Such rows must
