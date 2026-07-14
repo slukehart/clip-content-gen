@@ -3,6 +3,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from clipscore.ingest.dto import CampaignUpsert
 from clipscore.db.models import Campaign, CampaignSnapshot
+from clipscore.config import get_settings
+from clipscore.time import utcnow_iso
 
 EPOCH_RESET_RATIO = 1.10
 
@@ -63,3 +65,37 @@ def upsert_campaign(session: Session, up: CampaignUpsert, seen_at: str) -> Campa
     ))
     session.commit()
     return campaign
+
+def sweep_ended(session: Session, source: str, current_ids: set[str],
+                miss_counts: dict[str, int], threshold: int) -> int:
+    ended = 0
+    actives = session.execute(
+        select(Campaign).where(Campaign.source == source, Campaign.status == "active")
+    ).scalars().all()
+    for c in actives:
+        if c.external_id in current_ids:
+            miss_counts[c.external_id] = 0
+        else:
+            miss_counts[c.external_id] = miss_counts.get(c.external_id, 0) + 1
+            if miss_counts[c.external_id] >= threshold:
+                c.status = "ended"
+                ended += 1
+    session.commit()
+    return ended
+
+def run_ingest_batch(session: Session, ingester, seen_at: str | None = None,
+                     miss_counts: dict[str, int] | None = None) -> dict:
+    settings = get_settings()
+    seen_at = seen_at or utcnow_iso()
+    miss_counts = miss_counts if miss_counts is not None else {}
+    raws = ingester.fetch()
+    if len(raws) < settings.harvest_min_campaigns:
+        return {"status": "harvest_too_small", "count": len(raws)}
+    current_ids = set()
+    for raw in raws:
+        up = ingester.normalize(raw)
+        upsert_campaign(session, up, seen_at)
+        current_ids.add(up.external_id)
+    ended = sweep_ended(session, ingester.source_name, current_ids,
+                        miss_counts, settings.unseen_polls_to_end)
+    return {"status": "ok", "count": len(raws), "ended": ended}
