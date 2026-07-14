@@ -2,33 +2,16 @@
 Within-niche screening board. cvs_niche_percentile is the signal; cvs_raw is an
 internal scalar shown for debugging, NEVER a $/hr promise."""
 import argparse
-from sqlalchemy import select, func
 from sqlalchemy.orm import Session
-from clipscore.db.models import Campaign, CampaignScore
+from clipscore.scoring.board import eligible_latest_scores
 from clipscore.db.session import get_engine, SessionLocal
 
 CAVEAT = "estimated screening signal, not a payout prediction"
 
 
 def ranked_rows(session: Session, top: int | None = None, niche: str | None = None) -> list[dict]:
-    # latest score per campaign = max(id) per campaign_id
-    latest_ids = select(func.max(CampaignScore.id)).group_by(CampaignScore.campaign_id)
-    scores = session.execute(
-        select(CampaignScore).where(CampaignScore.id.in_(latest_ids))
-    ).scalars().all()
-    camps = {c.id: c for c in session.execute(select(Campaign)).scalars().all()}
     rows = []
-    for s in scores:
-        c = camps.get(s.campaign_id)
-        if c is None:
-            continue
-        # Only currently-eligible campaigns belong on the board. A campaign's last
-        # score row persists after it leaves eligibility (ended/walled/UGC), so
-        # without this filter the board would show stale campaigns ranked against a
-        # population they are no longer part of. Active campaigns are re-scored every
-        # ok cycle, so their latest score is always fresh.
-        if c.status != "active" or c.access_status != "ingestable" or c.campaign_type == "ugc":
-            continue
+    for c, s in eligible_latest_scores(session):
         key = c.niche or "other"
         if niche is not None and key != niche:
             continue
