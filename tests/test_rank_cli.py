@@ -46,3 +46,14 @@ def test_format_table_carries_caveat(session):
     out = format_table(ranked_rows(session))
     assert "estimated screening signal, not a payout prediction" in out
     assert "$/hr" not in out
+
+def test_none_percentile_sorts_last(session):
+    # zero-cpm campaigns get a score row with cvs_niche_percentile=None (excluded
+    # from the percentile population) — a genuinely reachable state. Such rows must
+    # sort BELOW any campaign with a real percentile, regardless of cvs_raw.
+    _camp(session, "real"); _camp(session, "nulled")
+    _score(session, "real", 1.0, 0.4, "2026-07-13T00:00:00Z")
+    _score(session, "nulled", 9.9, None, "2026-07-13T00:00:00Z")   # higher cvs_raw, but None pct
+    rows = ranked_rows(session)
+    assert [r["campaign_id"] for r in rows] == ["real", "nulled"]
+    assert rows[-1]["cvs_niche_percentile"] is None
