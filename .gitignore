@@ -1,0 +1,54 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---- Secrets & config ----
+.env
+.env.*
+!.env.example
+
+# ---- Databases (SQLite) ----
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+*-wal
+*-shm
+
+# ---- Media / downloaded footage (large, transient) ----
+media/
+downloads/
+clips/
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.m4a
+
+# ---- Local tooling / editor ----
+.gstack/
+.claude/settings.local.json
+.DS_Store
+.idea/
+.vscode/
+*.swp
