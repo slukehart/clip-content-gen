@@ -20,6 +20,7 @@ class CampaignUpsert:
     external_id: str
     snapshot: SnapshotData
     title: str | None = None
+    campaign_type: str | None = None
     niche: str | None = None
     cpm_usd: float | None = None
     platform_fee_pct: float | None = None

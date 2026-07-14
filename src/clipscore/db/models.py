@@ -13,6 +13,7 @@ class Campaign(Base):
     url: Mapped[str | None] = mapped_column(String, nullable=True)
     brand: Mapped[str | None] = mapped_column(String, nullable=True)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
+    campaign_type: Mapped[str | None] = mapped_column(String, nullable=True)
     niche: Mapped[str | None] = mapped_column(String, nullable=True)
     cpm_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     platform_fee_pct: Mapped[float | None] = mapped_column(Float, nullable=True)

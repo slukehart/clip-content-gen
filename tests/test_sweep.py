@@ -44,7 +44,10 @@ def test_run_batch_ok_path_creates_campaigns_and_snapshots(session):
     ]
     ingester = FakeIngester(raws=raws)
     result = run_ingest_batch(session, ingester, "2026-07-13T00:00:00Z")
-    assert result == {"status": "ok", "count": 50, "ended": 0}
+    assert result["status"] == "ok"
+    assert result["count"] == 50
+    assert result["skipped"] == 0
+    assert result["ended"] == 0
     assert session.query(Campaign).count() == 50
     assert session.query(CampaignSnapshot).count() == 50
 
