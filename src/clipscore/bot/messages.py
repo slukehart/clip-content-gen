@@ -6,10 +6,15 @@ NOT_A_GATE = "relatively best in its niche — not a quality gate"
 
 
 def format_alert(p: dict) -> str:
+    # Defend nullable campaign fields (title/url) the same way format_top/summary
+    # do, so a title-less campaign renders cleanly instead of a literal "None".
     pct = f"{p['percentile'] * 100:.0f}th pct" if p.get("percentile") is not None else "n/a"
+    title = p.get("title") or "(untitled)"
+    niche = p.get("niche") or "other"
+    url = p.get("url") or ""
     return (
-        f"📈 **{p['title']}** ({p['niche']}) — {pct} in niche\n"
-        f"{p['url']}\n"
+        f"📈 **{title}** ({niche}) — {pct} in niche\n"
+        f"{url}\n"
         f"_{NOT_A_GATE}; {CAVEAT}._"
     )
 

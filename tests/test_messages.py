@@ -30,3 +30,12 @@ def test_summary_movers_labeled_relative_not_improved():
     assert "change in relative niche standing" in out.lower()
     assert "improved" not in out.lower()
     assert "$/hr" not in out
+
+def test_alert_null_title_renders_cleanly():
+    # title-less campaign must not render a literal "None" or crash
+    p = dict(campaign_id="c1", title=None, niche="gaming", url=None,
+             percentile=0.95, cvs_raw=1.0, epoch=0)
+    out = format_alert(p)
+    assert "**None**" not in out
+    assert "(untitled)" in out
+    assert CAVEAT in out and NOT_A_GATE in out
