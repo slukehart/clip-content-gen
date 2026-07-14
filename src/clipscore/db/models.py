@@ -94,3 +94,13 @@ class Outcome(Base):
     actual_payout_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     payout_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     logged_at: Mapped[str] = mapped_column(String)
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    __table_args__ = (UniqueConstraint("campaign_id", "epoch", name="uq_alert_campaign_epoch"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[str] = mapped_column(String, index=True)
+    epoch: Mapped[int] = mapped_column(Integer)
+    niche: Mapped[str | None] = mapped_column(String, nullable=True)
+    cvs_niche_percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
+    alerted_at: Mapped[str] = mapped_column(String)
