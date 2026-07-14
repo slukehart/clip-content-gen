@@ -1,3 +1,4 @@
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from clipscore.db.models import PlatformTrust, NicheBaseline
 
@@ -6,15 +7,16 @@ PLATFORM_TRUST_SEED = [
     dict(source="contentrewards", trust_score=0.80, default_fee_pct=0.10,
          notes="Whop rails; reflects botting-flag/threshold-ban friction. VERIFY."),
 ]
+# Real source categories (slugified: category.strip().lower()). Uniform placeholder
+# guesses — within-niche ranking is partition-agnostic and cross-niche is not
+# trustworthy in v1, so differentiated per-niche guesses would be guess-on-guess.
+# null category normalizes to niche=None, which scoring maps to "other".
+_E_VIEWS_GUESS = 8000
+_P_THRESHOLD_GUESS = 0.55
 NICHE_BASELINE_SEED = [
-    dict(niche="gaming", e_views_median=10000, p_threshold=0.6),
-    dict(niche="entertainment", e_views_median=12000, p_threshold=0.65),
-    dict(niche="podcast", e_views_median=7000, p_threshold=0.55),
-    dict(niche="finance", e_views_median=5000, p_threshold=0.5),
-    dict(niche="fitness", e_views_median=8000, p_threshold=0.6),
-    dict(niche="tech", e_views_median=6000, p_threshold=0.55),
-    dict(niche="crypto", e_views_median=6000, p_threshold=0.5),
-    dict(niche="other", e_views_median=5000, p_threshold=0.5),
+    dict(niche=n, e_views_median=_E_VIEWS_GUESS, p_threshold=_P_THRESHOLD_GUESS)
+    for n in ("entertainment", "technology", "product", "music",
+              "logo", "personal brand", "slideshow", "gaming", "other")
 ]
 
 def seed_all(session: Session) -> None:
@@ -32,4 +34,8 @@ def seed_all(session: Session) -> None:
         else:
             for k, v in row.items():
                 setattr(existing, k, v)
+    canonical = {row["niche"] for row in NICHE_BASELINE_SEED}
+    for existing in session.execute(select(NicheBaseline)).scalars().all():
+        if existing.niche not in canonical:
+            session.delete(existing)
     session.commit()

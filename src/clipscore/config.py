@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     default_p_approval: float = 0.7
     default_assumed_cap_usd: float = 500.0
     hours_per_clip: float = 0.75
+    raw_retention_days: int = 14
     discord_token: str | None = None
     enable_playwright: bool = False
     source_base_url: str = "https://contentrewards.com"
