@@ -17,8 +17,11 @@ full pitch; the two design docs below are the source of truth for architecture.
   matches finished clips back to live campaigns, and presents a local review dashboard.
 
 **Status:** Pipeline A Stages 1–4 are merged (foundation, ingester, scoring, Discord bot —
-see [`plans/`](plans/)). The bot runs end-to-end (`clipscore bot`). Pipeline B is not yet
-started.
+see [`plans/`](plans/)). The bot runs end-to-end (`clipscore bot`). Pipeline B is designed
+(`PIPELINE_B_CLIP_FACTORY.md`, updated 2026-07-14 with the DB-audit + web-validated
+findings) and **Stage B1 (schema & LLM extraction) is planned** in
+[`plans/pipeline-b-stage-1-extraction.md`](plans/pipeline-b-stage-1-extraction.md) — not
+yet built. B1 is built before B0 (B0's price quote is an operator task).
 
 ## Non-negotiable principles
 
