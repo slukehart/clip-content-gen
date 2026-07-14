@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     hours_per_clip: float = 0.75
     discord_token: str | None = None
     enable_playwright: bool = False
+    source_base_url: str = "https://contentrewards.com"
+    discover_path: str = "/discover"
+    user_agent: str = "clipscore/0.1 (+personal research; contact via repo)"
+    http_timeout_s: int = 60
 
 
 @lru_cache
