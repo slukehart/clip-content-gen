@@ -5,7 +5,6 @@ every poll). Single plain GET of the already-served public page; no Playwright,
 no /api/ probing. Any challenge/block => SourceHalted (drop-don't-evade).
 Initial recon 2026-07-13: robots allows /discover; site ToS has no anti-scraping
 clause. See docs/spikes/2026-07-13-phase-0-stable-key-spike.md for payload shape."""
-import re
 import httpx
 from urllib.robotparser import RobotFileParser
 from clipscore.config import get_settings
@@ -44,7 +43,7 @@ class ContentrewardsIngester(BaseIngester):
             return  # robots unreachable: fail open on the check, response classifier still guards
         rp = RobotFileParser()
         rp.parse(r.text.splitlines())
-        if not rp.can_fetch(self._ua, self._path) and not rp.can_fetch("*", self._path):
+        if not rp.can_fetch(self._ua, self._path):
             raise SourceHalted(self._discover_url(), "robots_disallow", None,
                                f"robots.txt disallows {self._path}")
 
