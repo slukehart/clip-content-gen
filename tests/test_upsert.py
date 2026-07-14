@@ -38,3 +38,18 @@ def test_ended_campaign_revives_and_new_epoch(session):
     latest = session.query(CampaignSnapshot).order_by(CampaignSnapshot.id.desc()).first()
     assert latest.epoch == 1
     assert session.get(Campaign, c.id).status == "active"
+
+def test_campaign_type_is_persisted(session):
+    # regression: normalize sets campaign_type on the DTO, but upsert must copy it
+    # onto the Campaign row. Previously omitted from the field-copy loop -> all rows
+    # persisted campaign_type=None, so UGC campaigns were never distinguished.
+    up = _up(); up.campaign_type = "ugc"
+    c = upsert_campaign(session, up, "2026-07-13T00:00:00Z")
+    assert session.get(Campaign, c.id).campaign_type == "ugc"
+
+def test_campaign_type_updates_on_reupsert(session):
+    up1 = _up(); up1.campaign_type = "clipping"
+    c = upsert_campaign(session, up1, "2026-07-13T00:00:00Z")
+    up2 = _up(); up2.campaign_type = "both"
+    upsert_campaign(session, up2, "2026-07-13T01:00:00Z")
+    assert session.get(Campaign, c.id).campaign_type == "both"
