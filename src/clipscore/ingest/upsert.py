@@ -14,11 +14,11 @@ def _latest_snapshot(session: Session, campaign_id: str) -> CampaignSnapshot | N
         .order_by(CampaignSnapshot.id.desc()).limit(1)
     ).scalars().first()
 
-def _current_epoch(session: Session, campaign_id: str, new_remaining, was_ended: bool) -> int:
+def _current_epoch(session: Session, campaign_id: str, new_remaining, reviving: bool) -> int:
     latest = _latest_snapshot(session, campaign_id)
     if latest is None:
         return 0
-    if was_ended:
+    if reviving:
         return latest.epoch + 1
     prev = latest.budget_remaining_usd
     if prev is not None and new_remaining is not None and prev > 0 and new_remaining > prev * EPOCH_RESET_RATIO:
@@ -30,7 +30,7 @@ def upsert_campaign(session: Session, up: CampaignUpsert, seen_at: str) -> Campa
         select(Campaign).where(Campaign.source == up.source, Campaign.external_id == up.external_id)
     ).scalars().first()
 
-    was_ended = existing is not None and existing.status == "ended"
+    reviving = existing is not None and existing.status == "ended" and up.status != "ended"
 
     if existing is None:
         campaign = Campaign(
@@ -51,7 +51,7 @@ def upsert_campaign(session: Session, up: CampaignUpsert, seen_at: str) -> Campa
 
     session.flush()  # ensure campaign.id available
 
-    epoch = _current_epoch(session, campaign.id, up.snapshot.budget_remaining_usd, was_ended)
+    epoch = _current_epoch(session, campaign.id, up.snapshot.budget_remaining_usd, reviving)
     session.add(CampaignSnapshot(
         campaign_id=campaign.id, epoch=epoch,
         budget_total_usd=up.snapshot.budget_total_usd,
