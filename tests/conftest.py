@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from clipscore.db.base import Base
+from clipscore.db import models  # noqa: F401  — register ORM tables on Base.metadata
 
 
 @pytest.fixture
