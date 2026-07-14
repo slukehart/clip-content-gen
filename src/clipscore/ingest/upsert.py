@@ -85,17 +85,29 @@ def sweep_ended(session: Session, source: str, current_ids: set[str],
 
 def run_ingest_batch(session: Session, ingester, seen_at: str | None = None,
                      miss_counts: dict[str, int] | None = None) -> dict:
+    from clipscore.ingest.detect import SourceHalted
+    from clipscore.ingest.events import log_fetch_event, flip_access_status
     settings = get_settings()
     seen_at = seen_at or utcnow_iso()
     miss_counts = miss_counts if miss_counts is not None else {}
-    raws = ingester.fetch()
+    try:
+        raws = ingester.fetch()
+    except SourceHalted as e:
+        log_fetch_event(session, ingester.source_name, e.url, e.event_type,
+                        e.http_status, e.detail)
+        flip_access_status(session, ingester.source_name, "tos_restricted")
+        return {"status": "halted", "event_type": e.event_type}
     if len(raws) < settings.harvest_min_campaigns:
         return {"status": "harvest_too_small", "count": len(raws)}
-    current_ids = set()
+    current_ids, skipped = set(), 0
     for raw in raws:
-        up = ingester.normalize(raw)
-        upsert_campaign(session, up, seen_at)
-        current_ids.add(up.external_id)
+        try:
+            up = ingester.normalize(raw)
+            upsert_campaign(session, up, seen_at)
+            current_ids.add(up.external_id)
+        except Exception:
+            skipped += 1
+            continue
     ended = sweep_ended(session, ingester.source_name, current_ids,
                         miss_counts, settings.unseen_polls_to_end)
-    return {"status": "ok", "count": len(raws), "ended": ended}
+    return {"status": "ok", "count": len(raws), "skipped": skipped, "ended": ended}
