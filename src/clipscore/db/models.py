@@ -1,9 +1,10 @@
-from sqlalchemy import String, Integer, Float, Boolean, JSON, BigInteger
+from sqlalchemy import String, Integer, Float, Boolean, JSON, BigInteger, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from clipscore.db.base import Base
 
 class Campaign(Base):
     __tablename__ = "campaigns"
+    __table_args__ = (UniqueConstraint("source", "external_id", name="uq_source_external"),)
     id: Mapped[str] = mapped_column(String, primary_key=True)
     source: Mapped[str] = mapped_column(String, index=True)
     external_id: Mapped[str] = mapped_column(String, index=True)
