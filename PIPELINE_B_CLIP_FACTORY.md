@@ -18,10 +18,10 @@ Pipeline B automates the labor of clip production and leaves the operator in con
 |---|---|---|
 | Trigger model | **Suggest → operator approves → auto-produce** (Approach 1) | Connects A's rankings to B's queue; spend accrues only on approved campaigns; output is stuff the operator intends to post |
 | Source footage | **Creator VODs (Twitch/YouTube/Kick) + campaign-provided + long-form URL** | Matches how clipping actually works; pluggable acquisition layer |
-| Clip engine | **Existing hosted clipping API** (OpusClip/Klap/Vizard-class) | No GPU/ML build; per-clip cost; B is orchestration |
+| Clip engine | **Vizard.ai** (hosted AI clip API) behind `BaseClipEngine` | Verified vs official docs: real REST API; accepts uploaded-file **and** YouTube/Twitch/Drive/Vimeo URLs; AI highlight detection; API-controllable 9:16 / length / burned captions / face-reframe; returns clip files + transcript + `viralScore`. Klap = fallback adapter; OpusClip = third; hybrid self-host = future seam |
 | Review handoff | **Local web dashboard** | Inline video review with matched campaign + requirements + caption |
-| Volume | **~20–75 clips/day** | Reviewable by one operator |
-| Budget (B) | **$30–100/mo** (separate from A's ~$15/mo) | Serious side operation; tracked against real payouts |
+| Volume | **~15 clips/day** (~300–450/mo) | Right-sized: ≈ the max one manual poster can post (one account/platform, ~10–15/day across platforms) **and** ≈ the max the budget buys on a managed API. 20–75/day overshoots both. |
+| Budget (B) | **~$70–115/mo** on Vizard (separate from A's ~$15/mo) | Vizard bills by **source upload-minutes** (~6–10 min per usable clip), not per clip. Confirm the exact >600-min/mo rate with a real quote in B0. Cost lever = source-minutes processed → be selective about which/how-long VODs get fed in. |
 | Posting | **Manual, one account per platform, cross-posted** | Compliant, sustainable; no multi-account plumbing |
 | DB / topology | **SQLite (WAL), consolidated single process** | Inherited from Pipeline A |
 
@@ -33,7 +33,7 @@ New package `src/clipscore/factory/`. Heavy video work is offloaded to the hoste
 
 1. **Target extraction** (extends A's `normalize`): parse `requirements_raw` to pull each campaign's *target creator/source* and *clip specs* (platform, min/max length, aspect, caption/handle rules, banned content). Nullable + provenance-flagged, same partial-coverage discipline as A's cap/threshold extraction.
 2. **Acquisition layer** (`factory/acquire/`, pluggable `BaseAcquirer` mirroring A's `BaseIngester`): per-source-type modules — `twitch`, `youtube`, `kick`, `campaign_provided`, `url` — using `yt-dlp` into object storage. Each carries its own ToS gate and drop-don't-evade behavior.
-3. **Clip-engine client** (`factory/engine/`, pluggable `BaseClipEngine`): submit a source video + spec, poll, download finished clips. Vendor swappable behind the interface.
+3. **Clip-engine client** (`factory/engine/`, pluggable `BaseClipEngine`): submit a source video + spec, poll, download finished clips. First adapter **Vizard** (`videoUrl` + `videoType`, `ratioOfClip:1`, `preferLength`, `subtitleSwitch`, `maxClipNumber`; returns `videoUrl`/`transcript`/`viralScore`/`duration`); Klap fallback adapter; vendor swappable behind the interface.
 4. **Matching** (`factory/matching.py`): for each finished clip, find every live campaign whose target creator + platform + specs it satisfies, rank by A's CVS niche-percentile × spec-fit.
 5. **Caption generation** (`factory/captions.py`): LLM-suggested caption per (clip, campaign) from the clip transcript + campaign rules.
 6. **Web dashboard** (`factory/web/`, FastAPI + lightweight templates/htmx): the *approval* surface (A's top campaigns + "Clip this"), the *review* surface (watch clip inline, ranked matched campaigns + requirements + caption, download, mark-posted), a *manual-entry form* for walled-source campaigns, and *cost/compliance* readouts.
@@ -152,11 +152,13 @@ Follows Pipeline A's **Storage conventions** (UUID→TEXT, money→REAL, arrays�
 - Manual (`ingest_method='manual'`) and auto campaigns match identically.
 - **Duplicate-deliverable guard (critical):** Whop's ToS prohibits duplicate deliverables ("each Deliverable must be unique"); clipping.net requires unique content per account. So although one clip may *match* several campaigns, the dashboard **warns against posting the identical clip file to more than one campaign for pay** — the operator picks the single best-scoring match, or the engine produces a distinct variant per campaign. Matching surfaces options; the compliance guard prevents the violation.
 
-## Cost guardrails ($30–100/mo, ~20–75 clips/day)
+## Cost guardrails (~$70–115/mo, ~15 clips/day)
 
+- **Billing model:** Vizard charges by **source upload-minutes** (1 credit = 1 min), not per output clip. So the cost driver is *how much long-form footage is fed in* (~6–10 min per usable clip). Track `source_asset.duration_s` as the cost basis; `est_cost_usd` on a `clip_job` is derived from the source length, not the clip count.
 - `est_cost_usd` surfaced **at the approval click** — operator sees spend before greenlighting.
-- `clips.cost_usd` tracked; a **rolling monthly total** on the dashboard; `MONTHLY_CAP_USD` config. As projected spend nears the cap, **new `clip_jobs` pause (in-flight finish) and the operator is alerted** — no surprise overage.
-- **`source_asset` dedup** bounds cost: same creator across two campaigns = one download + one clip run.
+- `clips.cost_usd` tracked; a **rolling monthly total (in upload-minutes and $)** on the dashboard; `MONTHLY_CAP_USD` config. As projected spend nears the cap, **new `clip_jobs` pause (in-flight finish) and the operator is alerted** — no surprise overage.
+- **`source_asset` dedup** bounds cost: same creator across two campaigns = one upload + one clip run.
+- **Be selective at the source:** prefer feeding VODs from well-funded, high-CVS campaigns and trimming to the liveliest segments — this pulls upload-minutes (and cost) toward the low end.
 - Because the operator approves each campaign (Approach 1), spend is inherently bounded by approvals.
 
 ## Error handling & brittleness
@@ -193,8 +195,8 @@ Cover:    high-contrast frame + on-screen title; few niche hashtags
 
 ## Phases
 
-### Phase B0 — Clip-engine vendor spike (do first — biggest unverified assumption)
-Pick and price the clipping engine. Confirm a candidate (OpusClip / Klap / Vizard / equivalent) that: (a) has a real **API** (not just a web UI), (b) supports the output spec above (9:16, per-platform lengths, burned captions, face-tracked reframe), (c) costs acceptably at ~20–75 clips/day within the $30–100/mo budget, (d) accepts arbitrary source video. Implement `BaseClipEngine` against it. **Acceptance:** one real source video → finished spec-compliant clips via API, with per-clip cost measured.
+### Phase B0 — Clip-engine adapter + price confirmation (do first)
+Vendor is **selected: Vizard** (verified against official docs — real REST API, arbitrary source via file/URL, AI highlights, API-controllable 9:16/length/burned-captions/reframe, clip files + `viralScore` returned). Two things remain: (a) **get a real Vizard pricing quote at ~2,700–4,500 upload-min/mo** to confirm the ~$70–115/mo estimate (published tiers cap at 600 min/mo; higher volume is quote-based) — if it comes back materially higher, revisit volume or the Klap fallback; (b) implement `BaseClipEngine` with a **Vizard adapter** (leave a Klap adapter stub and a `HybridSelfHostEngine` seam so the managed-vs-self-host choice stays a config switch). **Acceptance:** one real source video → finished spec-compliant clips via the Vizard API, with source-upload-minute cost measured against the quote.
 
 ### Phase B1 — Schema & scaffolding
 `factory/` package; Alembic migration for the new tables + `campaigns` columns; extend A's `normalize` with target/spec extraction (regex, provenance-flagged). **Acceptance:** migration applies; extraction unit-tested against fixtures.
@@ -222,7 +224,7 @@ FastAPI app: approval surface (A's top campaigns + est-cost + "Clip this"), revi
 
 ## Open questions / risks
 
-- **Clip-engine vendor** is the biggest unknown — resolved by Phase B0 before committing downstream design.
+- **Clip-engine vendor** resolved: **Vizard** (verified vs docs), Klap fallback. Residual: confirm Vizard's exact price above 600 upload-min/mo via a sales quote in Phase B0 (estimate ~$70–115/mo at ~15 clips/day); if materially higher, revisit volume or Klap.
 - **Target-creator/spec extraction coverage** from free-text briefs will be partial (same reality as A's cap/threshold extraction); low-coverage campaigns produce weaker matches — acceptable, flagged.
 - **Creator-VOD acquisition is legally gray** and campaign-dependent; keep campaign-provided/URL paths as the safer default and treat VOD acquisition as opt-in per authorizing campaign.
 - **Storage/bandwidth** for VODs (multi-GB) must be aggressively cleaned; watch cost.
