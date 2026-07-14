@@ -17,7 +17,7 @@ Pipeline B automates the labor of clip production and leaves the operator in con
 | Decision | Choice | Rationale |
 |---|---|---|
 | Trigger model | **Suggest → operator approves → auto-produce** (Approach 1) | Connects A's rankings to B's queue; spend accrues only on approved campaigns; output is stuff the operator intends to post |
-| Source footage | **Creator VODs (Twitch/YouTube/Kick) + campaign-provided + long-form URL** | Matches how clipping actually works; pluggable acquisition layer |
+| Source footage | **Campaign-provided footage bank (Google Drive/link) FIRST; creator VODs (Twitch/YouTube/Kick) + long-form URL as opt-in fallbacks** | Empirically the norm, not the exception — Whop's own docs say *"the brand brings the demand and usually the footage. You bring the cut,"* delivered via Google Drive. Provided-bank is also the cleanest legally. Pluggable acquisition layer. See **Empirical grounding**. |
 | Clip engine | **Vizard.ai** (hosted AI clip API) behind `BaseClipEngine` | Verified vs official docs: real REST API; accepts uploaded-file **and** YouTube/Twitch/Drive/Vimeo URLs; AI highlight detection; API-controllable 9:16 / length / burned captions / face-reframe; returns clip files + transcript + `viralScore`. Klap = fallback adapter; OpusClip = third; hybrid self-host = future seam |
 | Review handoff | **Local web dashboard** | Inline video review with matched campaign + requirements + caption |
 | Volume | **~15 clips/day** (~300–450/mo) | Right-sized: ≈ the max one manual poster can post (one account/platform, ~10–15/day across platforms) **and** ≈ the max the budget buys on a managed API. 20–75/day overshoots both. |
@@ -27,12 +27,49 @@ Pipeline B automates the labor of clip production and leaves the operator in con
 
 ---
 
+## Empirical grounding (2026-07-14) — DB audit + web validation
+
+Before building B, we audited the two things a clip engine actually needs — *what footage to feed it* and *at what specs* — against the **real ingested data** (`clipscore.db`: 509 campaigns; **405 `clipping`/`both`**; 365 with a non-empty `description`) and cross-checked the architecture against the open web. This is the evidence base for the reframes below; it replaces the doc's original creator-VOD-first assumption.
+
+**What the ingested `description` actually contains** (clipping/both, n=365):
+
+| Signal the engine needs | Coverage in ingested `description` | Implication |
+|---|---|---|
+| Points to a provided footage bank (Resources/Drive/Docs/"footage") | **121/365 (33%)** | Footage is usually *brand-provided*, not a VOD to fetch. This is a **floor** — the Drive link lives on the Whop product page, not in the blurb we ingest. |
+| Target creator as an `@handle` (regex-findable) | **15/365 (4%)** | Regex floor is ~4%; creator **names** appear in prose in ~half the sample ("James Hype", "Leo Grundström", "Carey James") → LLM ceiling is far higher. |
+| Length / aspect spec | **37/365 (10%)** | Specs live in the brief/Drive doc, not the ingested text. |
+| Caption / sound / tag rule | **24/365 (6%)** | Same — sparse in the blurb, richer on the product page. |
+| Substantive (>200 chars) / near-useless (<40 chars) | 49% / 9% | ~half the descriptions carry real detail; a tail is title-only ("$31"). |
+
+Descriptions are also **multilingual** (Spanish/Arabic/French observed) — which kills the existing regex extractor outright.
+
+**Web validation** (primary + secondary sources):
+- **Provided-bank is the norm — confirmed first-party.** Whop's docs: clipping campaigns give clippers *"Access to your video footage and any assets they can use,"* via *"Google Drive or similar";* *"the brand … usually [provides] the footage. You bring the cut."*
+- **The spec fields we plan to extract == the fields brands set:** *content-quality standards, brand-mention requirements, prohibited-content guidelines, video length/format specifications, required messaging* (Whop docs) — a near-1:1 match to `caption_rules` / `banned_content` / `clip_*_len_s`.
+- **Clip output spec holds:** 9:16 vertical, burned-in captions (≈50% watch muted), hook in first ~3s (2025/2026 short-form guidance).
+- **Compliance posture holds:** unique content per account, duplicate-content ban, no multi-account farms, no evasion (clipping.net, clipster.gg, Whop).
+- **Vizard capabilities match the doc exactly:** `videoUrl`+`videoType`, `preferLength`, `ratioOfClip:1`, `subtitleSwitch`, `maxClipNumber`, viral-score ranking (Vizard API docs).
+
+**Two web-driven refinements folded into this spec:**
+- **(A) Clip length is dynamic, not fixed.** The doc's original numbers (TikTok ~30s, Reels 7–20s) reflect an outdated sweet spot; current guidance is TikTok **60–180s** for substance, Reels 15–30s *or* 60–90s, Shorts <60s. → extract `preferLength` **per campaign** from the brief; treat the numbers under *Clip output spec* as fallback defaults only.
+- **(B) FTC disclosure.** Every paid clip is a *"material connection under US FTC rules"* needing disclosure (#ad). Capture it as a `caption_rules` element and surface it on the review dashboard.
+
+**Net effect on the design** (reflected in the sections below):
+1. **Acquisition:** `campaign_provided` is the **primary** path; VODs are opt-in per authorizing campaign.
+2. **Extraction (B1):** **LLM-based, not regex** (prose creator-names + multilingual), and it must **enrich from the Whop product page**, not just the ingested `description`. The `campaigns.url` fix (2026-07-14) now points at the real `whop.com` product page; its `robots.txt` is `Allow: /` (only `/api/` and `/discover/search/*` disallowed), so the page is fetchable under drop-don't-evade. New column `content_bank_url`.
+3. **Clip spec:** length is per-campaign (refinement A).
+4. **Compliance:** add FTC disclosure (refinement B).
+
+*Sources:* [Whop Content Rewards docs](https://docs.whop.com/memberships-and-access/third-party-apps/content-rewards) · [Whop blog](https://whop.com/blog/whop-content-rewards/) · [clipster.gg rules](https://www.clipster.gg/general-campaign-rules) · [clipping.net terms](https://clipping.net/policies/clipper-terms-and-conditions) · [Vizard API docs](https://docs.vizard.ai/docs/) · [short-form length 2025 (Shortimize)](https://www.shortimize.com/blog/video-length-sweet-spots-tiktok-reels-shorts)
+
+---
+
 ## Architecture
 
 New package `src/clipscore/factory/`. Heavy video work is offloaded to the hosted clip engine, so B is an orchestrator of background jobs plus a small control/review UI. Components:
 
-1. **Target extraction** (extends A's `normalize`): parse `requirements_raw` to pull each campaign's *target creator/source* and *clip specs* (platform, min/max length, aspect, caption/handle rules, banned content). Nullable + provenance-flagged, same partial-coverage discipline as A's cap/threshold extraction.
-2. **Acquisition layer** (`factory/acquire/`, pluggable `BaseAcquirer` mirroring A's `BaseIngester`): per-source-type modules — `twitch`, `youtube`, `kick`, `campaign_provided`, `url` — using `yt-dlp` into object storage. Each carries its own ToS gate and drop-don't-evade behavior.
+1. **Target extraction** — a **separate guarded post-ingest step** (`factory/enrich.py` orchestrating `factory/extract.py`), **not inline in A's `normalize`**, so an extraction failure can never break A's ingest. Pulls each campaign's *content bank / target creator* and *clip specs* (platform, min/max length, aspect, caption/handle rules, banned content). **LLM-based, not regex** — creator names arrive as free-text prose and the descriptions are multilingual (see Empirical grounding), so A's regex extractor is a floor, not a solution. Input is the ingested `description` **plus the Whop product page** (`campaigns.url`, robots-cleared), because the footage-bank Drive link and detailed specs live on the page, not in the blurb. Every field nullable + provenance-flagged by source (`description` | `whop_page` | `allowed_socials` | `absent`), same honest partial-coverage discipline as A. Regex remains as a cheap fallback / cross-check.
+2. **Acquisition layer** (`factory/acquire/`, pluggable `BaseAcquirer` mirroring A's `BaseIngester`): per-source-type modules — `campaign_provided` (the **primary** path: brand's Drive/link footage bank), `url`, then `twitch`/`youtube`/`kick` (opt-in fallbacks) — using `yt-dlp` into object storage. Each carries its own ToS gate and drop-don't-evade behavior.
 3. **Clip-engine client** (`factory/engine/`, pluggable `BaseClipEngine`): submit a source video + spec, poll, download finished clips. First adapter **Vizard** (`videoUrl` + `videoType`, `ratioOfClip:1`, `preferLength`, `subtitleSwitch`, `maxClipNumber`; returns `videoUrl`/`transcript`/`viralScore`/`duration`); Klap fallback adapter; vendor swappable behind the interface.
 4. **Matching** (`factory/matching.py`): for each finished clip, find every live campaign whose target creator + platform + specs it satisfies, rank by A's CVS niche-percentile × spec-fit.
 5. **Caption generation** (`factory/captions.py`): LLM-suggested caption per (clip, campaign) from the clip transcript + campaign rules.
@@ -132,12 +169,14 @@ Follows Pipeline A's **Storage conventions** (UUID→TEXT, money→REAL, arrays�
 ### `campaigns` — new columns (Pipeline A table)
 | Column | Type | Notes |
 |---|---|---|
-| target_creator | TEXT (JSON array) | creators/sources to clip, extracted from `requirements_raw` |
+| content_bank_url | TEXT nullable | **primary acquisition input** — brand's Drive/link footage bank, extracted from the brief/Whop page |
+| target_creator | TEXT (JSON array) | creators/sources to clip (for VOD-type campaigns), LLM-extracted from `description` + Whop page |
 | target_platforms | TEXT (JSON array) | platforms the campaign accepts |
-| clip_min_len_s | INTEGER nullable | extracted; partial coverage |
+| clip_min_len_s | INTEGER nullable | extracted; partial coverage; per-campaign `preferLength` (see refinement A) |
 | clip_max_len_s | INTEGER nullable | extracted; partial coverage |
-| caption_rules | TEXT nullable | required handles/hashtags/disclaimers from brief |
+| caption_rules | TEXT nullable | required handles/hashtags/disclaimers from brief — **including FTC #ad disclosure** (refinement B) |
 | banned_content | TEXT nullable | content prohibitions from brief |
+| extract_provenance | TEXT nullable | JSON: per-field **source** (`description` \| `whop_page` \| `allowed_socials` \| `absent`) — honest coverage tracking; records where a value came from, not which extractor found it. `allowed_socials` marks a field defaulted from A's ingested field, not read from brief text |
 
 ### Reused: `outcomes` (Pipeline A)
 "Mark posted" writes `clips_posted` / `campaign_id` here so B's spend is measured against real logged payouts.
@@ -171,6 +210,7 @@ Follows Pipeline A's **Storage conventions** (UUID→TEXT, money→REAL, arrays�
 ## Compliance & legal posture
 
 - **Posting is manual, one account per platform, cross-posted across platforms** (TikTok/Reels/Shorts), each submission unique. No multi-account plumbing — the multi-account "clip farm" model violates payout-platform unique-deliverable and anti-automation rules and triggers duplicate-hash / coordinated-behavior bans; for a solo human its expected value is negative.
+- **FTC disclosure.** A paid clip is a *material connection* under US FTC rules; the operator discloses (e.g. `#ad`) on each post. The extractor captures any campaign-required disclosure into `caption_rules`, and the review dashboard surfaces a disclosure reminder on every clip regardless — this is a legal requirement independent of whether a given campaign states it.
 - **Per-source acquisition posture:**
   - **Campaign-provided footage** — cleanest; prefer when offered.
   - **Creator VODs (Twitch/YouTube/Kick)** — downloading third-party VODs is generally against those platforms' ToS; the defensible basis is **the campaign's authorization/content license to clip that creator**. Only acquire a creator that an engaged campaign authorizes; record `authorizing_campaign_id`; honor the campaign's content rules. Genuinely gray and campaign-dependent — flagged, not hand-waved.
@@ -183,7 +223,7 @@ Research-derived defaults (vendor-sourced — tunable, not laws). One source →
 
 ```
 9:16 vertical, 1080×1920, full-bleed, H.264 MP4 (native upload — no embedded links)
-Length:   TikTok ~30s  │  Reels ~7–20s  │  Shorts <60s   (maximize length × retention)
+Length:   per-campaign preferLength (extracted) │ fallbacks: TikTok 60–180s · Reels 15–90s · Shorts <60s   (maximize length × retention; see refinement A — old ~30s sweet spot is dated)
 Hook:     peak moment in first 1–3s + text-hook overlay on frame 1, synced to first audio beat
 Captions: burned-in ALWAYS (assume muted), word-by-word/karaoke style, inside UI safe zones
 Framing:  face-tracked auto-crop; split-screen (facecam + content) for reaction/gameplay/podcast
@@ -195,11 +235,17 @@ Cover:    high-contrast frame + on-screen title; few niche hashtags
 
 ## Phases
 
-### Phase B0 — Clip-engine adapter + price confirmation (do first)
-Vendor is **selected: Vizard** (verified against official docs — real REST API, arbitrary source via file/URL, AI highlights, API-controllable 9:16/length/burned-captions/reframe, clip files + `viralScore` returned). Two things remain: (a) **get a real Vizard pricing quote at ~2,700–4,500 upload-min/mo** to confirm the ~$70–115/mo estimate (published tiers cap at 600 min/mo; higher volume is quote-based) — if it comes back materially higher, revisit volume or the Klap fallback; (b) implement `BaseClipEngine` with a **Vizard adapter** (leave a Klap adapter stub and a `HybridSelfHostEngine` seam so the managed-vs-self-host choice stays a config switch). **Acceptance:** one real source video → finished spec-compliant clips via the Vizard API, with source-upload-minute cost measured against the quote.
+> **Build order (revised 2026-07-14):** B0's *price quote* is an **operator procurement task** (sign up for Vizard, request a quote, obtain an API key) — it gates cost, not code, and runs **in parallel**. The first code we build is **B1 (extraction)** — the clip-**accuracy** crux validated in *Empirical grounding* — because there is no point proving the engine (B0 adapter) until we can determine *what to feed it* for most campaigns. B0's adapter follows once a Vizard key exists.
 
-### Phase B1 — Schema & scaffolding
-`factory/` package; Alembic migration for the new tables + `campaigns` columns; extend A's `normalize` with target/spec extraction (regex, provenance-flagged). **Acceptance:** migration applies; extraction unit-tested against fixtures.
+### Phase B0 — Vizard price confirmation + clip-engine adapter
+Vendor is **selected: Vizard** (verified against official docs — real REST API, arbitrary source via file/URL, AI highlights, API-controllable 9:16/length/burned-captions/reframe, clip files + `viralScore` returned).
+- **B0a — price quote (operator task, do first, no code):** get a real Vizard pricing quote at ~2,700–4,500 upload-min/mo to confirm the ~$70–115/mo estimate (published tiers cap at 600 min/mo; higher volume is quote-based) and obtain an API key. If materially higher, revisit volume or the Klap fallback.
+- **B0b — adapter (code, needs the B0a key):** implement `BaseClipEngine` with a **Vizard adapter** (leave a Klap adapter stub and a `HybridSelfHostEngine` seam so managed-vs-self-host stays a config switch).
+
+**Acceptance:** one real source video → finished spec-compliant clips via the Vizard API, with source-upload-minute cost measured against the quote.
+
+### Phase B1 — Schema & extraction (BUILD FIRST — see build-order note)
+`factory/` package; Alembic migration `0004` for the new tables + `campaigns` columns (incl. `content_bank_url`, `extract_provenance`); **`factory/extract.py` — LLM-based target/spec extraction** enriched from the Whop product page (not just the ingested `description`), provenance-flagged per field, with A's regex kept as a cheap fallback/cross-check. First task **calibrates against real data** (the folded-in coverage audit): measure extraction coverage — regex floor vs LLM ceiling vs +Whop-page delta — over a stratified sample of the 405 real clipping campaigns, and freeze that sample as the test fixture set. **Acceptance:** migration applies; extraction is unit-tested against fixtures; a coverage report (floor/ceiling/+whop, footage-source distribution) is written to `docs/spikes/`. See `plans/pipeline-b-stage-1-extraction.md`.
 
 ### Phase B2 — Acquisition layer
 `BaseAcquirer` + `campaign_provided` and `url` acquirers first (cleanest legally), then `youtube`/`twitch`/`kick` via `yt-dlp`; object storage; dedup; drop-don't-evade + retention. **Acceptance:** a source video is fetched to storage from each acquirer type (mock where needed), deduped, and a blocked download is logged-and-skipped.
@@ -225,6 +271,6 @@ FastAPI app: approval surface (A's top campaigns + est-cost + "Clip this"), revi
 ## Open questions / risks
 
 - **Clip-engine vendor** resolved: **Vizard** (verified vs docs), Klap fallback. Residual: confirm Vizard's exact price above 600 upload-min/mo via a sales quote in Phase B0 (estimate ~$70–115/mo at ~15 clips/day); if materially higher, revisit volume or Klap.
-- **Target-creator/spec extraction coverage** from free-text briefs will be partial (same reality as A's cap/threshold extraction); low-coverage campaigns produce weaker matches — acceptable, flagged.
+- **Target-creator/spec extraction coverage** from free-text briefs will still be partial even with LLM + Whop-page enrichment (some briefs are title-only; specs may sit inside a Drive doc we don't parse). B1 measures the real coverage (floor/ceiling/+whop) rather than assuming it; low-coverage campaigns produce weaker matches — acceptable, flagged, and surfaced via `extract_provenance`.
 - **Creator-VOD acquisition is legally gray** and campaign-dependent; keep campaign-provided/URL paths as the safer default and treat VOD acquisition as opt-in per authorizing campaign.
 - **Storage/bandwidth** for VODs (multi-GB) must be aggressively cleaned; watch cost.

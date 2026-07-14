@@ -66,3 +66,25 @@ def test_bot_routes_to_run_bot_with_session_factory():
         main(["bot"])
     from clipscore.cli import SessionLocal
     m.assert_called_once_with(SessionLocal)
+
+
+def test_extract_routes_to_enrich_batch():
+    with patch("clipscore.cli.get_engine"), \
+         patch("clipscore.cli.SessionLocal", MagicMock()), \
+         patch("clipscore.cli.enrich_batch", return_value={"processed": 3}) as m, \
+         patch("clipscore.cli.generate_coverage_spike_report") as report_m:
+        main(["extract"])
+    m.assert_called_once()
+    _, kwargs = m.call_args
+    assert kwargs["only_stale"] is True
+    report_m.assert_not_called()
+
+
+def test_extract_report_routes_to_report_driver():
+    with patch("clipscore.cli.get_engine"), \
+         patch("clipscore.cli.SessionLocal", MagicMock()), \
+         patch("clipscore.cli.enrich_batch") as enrich_m, \
+         patch("clipscore.cli.generate_coverage_spike_report", return_value="content") as m:
+        main(["extract", "--report"])
+    m.assert_called_once()
+    enrich_m.assert_not_called()

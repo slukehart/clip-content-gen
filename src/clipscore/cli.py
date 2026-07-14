@@ -8,12 +8,15 @@ after `pip install -e .` these are real terminal commands:
     clipscore rank [--top N] [--niche X]
     clipscore smoke [db_path]   # live capture check into a throwaway DB
     clipscore bot       # run the Discord bot (needs CLIPSCORE_DISCORD_TOKEN)
+    clipscore extract   # one incremental Pipeline B enrich_batch sweep (only_stale)
+    clipscore extract --report   # OPERATOR-RUN: full coverage spike report (needs LLM key)
 
 The configured DB is CLIPSCORE_DB_URL (see config.Settings). `setup` uses the ORM
 metadata directly; production schema upgrades still go through `alembic upgrade head`.
 """
 import argparse
 
+from clipscore.config import get_settings
 from clipscore.db.base import Base
 from clipscore.db import models  # noqa: F401  register ORM tables on Base.metadata
 from clipscore.db.session import get_engine, SessionLocal
@@ -22,6 +25,8 @@ from clipscore.jobs.poll import run_once
 from clipscore.jobs.rank import ranked_rows, format_table
 from clipscore.jobs.smoke import run_smoke
 from clipscore.bot.discord_bot import run_bot
+from clipscore.factory.enrich import enrich_batch
+from clipscore.factory.report import generate_coverage_spike_report
 
 
 def _setup(args) -> None:
@@ -53,6 +58,17 @@ def _bot(args) -> None:
     run_bot(SessionLocal)
 
 
+def _extract(args) -> None:
+    get_engine()
+    with SessionLocal() as s:
+        settings = get_settings()
+        if args.report:
+            content = generate_coverage_spike_report(s, settings)
+            print(f"wrote coverage spike report ({len(content)} chars)")
+        else:
+            print(enrich_batch(s, settings, only_stale=True))
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="clipscore", description="clipscore pipeline commands")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -70,6 +86,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(fn=_smoke)
 
     sub.add_parser("bot", help="run the Discord bot").set_defaults(fn=_bot)
+
+    xp = sub.add_parser("extract", help="incremental Pipeline B enrich_batch sweep")
+    xp.add_argument("--report", action="store_true",
+                     help="OPERATOR-RUN: full coverage spike report (needs LLM key)")
+    xp.set_defaults(fn=_extract)
     return p
 
 

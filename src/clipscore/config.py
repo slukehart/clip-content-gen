@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     whop_base_url: str = "https://whop.com"
     user_agent: str = "clipscore/0.1 (+personal research; contact via repo)"
     http_timeout_s: int = 60
+    llm_api_key: str | None = None
+    llm_model: str = "claude-haiku-4-5"
+    extract_from_whop_page: bool = True
+    extract_enabled: bool = True
+    # Modest pacing between real (non-injected-fetch) Whop page fetches within
+    # a single enrich_batch sweep -- see plans/pipeline-b-stage-1-extraction.md
+    # Global Constraints ("modest pacing"). Not applied when a fake `fetch` is
+    # injected (tests stay fast).
+    whop_fetch_pacing_s: float = 1.0
 
 
 @lru_cache
