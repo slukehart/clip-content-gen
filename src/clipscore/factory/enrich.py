@@ -8,6 +8,8 @@ unexpected) falls back to the regex floor. `enrich_batch` is the poll-time /
 report-time sweep over clipping campaigns.
 """
 import json
+import time
+import httpx
 import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -131,7 +133,30 @@ def enrich_batch(session: Session, settings: Settings, only_stale: bool = True,
 
     campaigns = session.execute(query).scalars().all()
     processed = 0
-    for campaign in campaigns:
-        enrich_campaign(session, campaign, settings, extractor=extractor, fetch=fetch)
-        processed += 1
+
+    if fetch is not None:
+        # Tests (and any other caller) inject their own `fetch` -- no real
+        # network happens here, so no shared client/robots-cache/pacing is
+        # needed and CI stays fast.
+        for campaign in campaigns:
+            enrich_campaign(session, campaign, settings, extractor=extractor, fetch=fetch)
+            processed += 1
+        return {"processed": processed}
+
+    # Real network sweep: share ONE httpx.Client and ONE per-run robots.txt
+    # verdict cache across every campaign in this batch (robots.txt fetched
+    # at most once per host, not once per campaign -- see
+    # plans/pipeline-b-stage-1-extraction.md Global Constraints), and apply a
+    # small configurable pacing delay between real page fetches.
+    robots_cache: dict = {}
+    with httpx.Client(timeout=settings.http_timeout_s, follow_redirects=True) as client:
+        def _paced_fetch(url: str) -> str | None:
+            text = fetch_page_text(url, client=client, robots_cache=robots_cache)
+            time.sleep(settings.whop_fetch_pacing_s)
+            return text
+
+        for campaign in campaigns:
+            enrich_campaign(session, campaign, settings, extractor=extractor, fetch=_paced_fetch)
+            processed += 1
+
     return {"processed": processed}

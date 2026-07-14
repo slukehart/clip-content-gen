@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     llm_model: str = "claude-haiku-4-5"
     extract_from_whop_page: bool = True
     extract_enabled: bool = True
+    # Modest pacing between real (non-injected-fetch) Whop page fetches within
+    # a single enrich_batch sweep -- see plans/pipeline-b-stage-1-extraction.md
+    # Global Constraints ("modest pacing"). Not applied when a fake `fetch` is
+    # injected (tests stay fast).
+    whop_fetch_pacing_s: float = 1.0
 
 
 @lru_cache

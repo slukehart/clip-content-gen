@@ -1,10 +1,13 @@
 import json
 import uuid
+import httpx
 from clipscore.db.models import Campaign
 from clipscore.factory.extract import ExtractedTargets
 from clipscore.factory import enrich
 from clipscore.config import Settings
 from clipscore.time import utcnow_iso
+
+_PAGE = "<html>" + "self.__next_f.push(['x','product data here'])" + " " * 1200 + "</html>"
 
 
 class FakeExtractor:
@@ -130,6 +133,54 @@ def test_enrich_batch_skips_non_clipping_campaigns(session):
     result = enrich.enrich_batch(session, Settings(_env_file=None), only_stale=True,
                                  fetch=lambda *a, **k: None)
     assert result["processed"] == 0
+
+
+def test_enrich_batch_real_sweep_caches_robots_and_shares_client(session, monkeypatch):
+    """Compliance fix: within one enrich_batch call over several campaigns on
+    the real (non-injected-fetch) network path, robots.txt must be fetched at
+    MOST ONCE per host, and a single httpx.Client + a sleep-per-page-fetch
+    pacing must be used -- not one client/robots-check per campaign."""
+    c1 = _campaign(external_id="a", url="https://whop.com/a")
+    c2 = _campaign(external_id="b", url="https://whop.com/b")
+    c3 = _campaign(external_id="c", url="https://whop.com/c")
+    session.add_all([c1, c2, c3])
+    session.commit()
+
+    robots_requests = []
+    page_requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            robots_requests.append(request.url.host)
+            return httpx.Response(200, text="User-agent: *\nAllow: /\n")
+        page_requests.append(request.url.path)
+        return httpx.Response(200, text=_PAGE)
+
+    transport = httpx.MockTransport(handler)
+    real_client_cls = httpx.Client
+    client_instances = []
+
+    def fake_client(*args, **kwargs):
+        inst = real_client_cls(*args, transport=transport, **kwargs)
+        client_instances.append(inst)
+        return inst
+
+    monkeypatch.setattr(enrich.httpx, "Client", fake_client)
+
+    sleeps = []
+    monkeypatch.setattr(enrich.time, "sleep", lambda s: sleeps.append(s))
+
+    settings = Settings(_env_file=None, whop_fetch_pacing_s=0.01)
+    result = enrich.enrich_batch(session, settings, only_stale=True, fetch=None)
+
+    assert result["processed"] == 3
+    # robots.txt fetched AT MOST ONCE across the whole sweep, not once per campaign
+    assert len(robots_requests) == 1
+    assert len(page_requests) == 3
+    # exactly one httpx.Client was constructed for the whole sweep
+    assert len(client_instances) == 1
+    # pacing sleep applied once per real page fetch, using the configured delay
+    assert sleeps == [0.01, 0.01, 0.01]
 
 
 def test_enrich_batch_noop_when_extract_disabled(session):
