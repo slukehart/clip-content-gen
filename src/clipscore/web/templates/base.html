@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}clipscore{% endblock %}</title>
+  <script src="/static/htmx.min.js" defer></script>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 900px; padding: 0 1rem; }
+    nav a { margin-right: 1rem; }
+    .warn { color: #b45309; background: #fffbeb; padding: .5rem .75rem; border-radius: 6px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid #eee; }
+    .muted { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <nav><a href="/">Approve</a><a href="/review">Review</a><a href="/manual">Manual entry</a></nav>
+  {% block body %}{% endblock %}
+</body>
+</html>

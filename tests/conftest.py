@@ -1,13 +1,23 @@
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 from clipscore.db.base import Base
 from clipscore.db import models  # noqa: F401  — register ORM tables on Base.metadata
 
 
 @pytest.fixture
 def session():
-    engine = create_engine("sqlite:///:memory:")
+    # StaticPool + check_same_thread=False: FastAPI's TestClient dispatches
+    # requests via anyio on a separate thread, so a plain in-memory sqlite
+    # engine (SingletonThreadPool) would hand that thread a *different*,
+    # empty :memory: connection. Sharing one static connection across
+    # threads lets web-route tests reuse this fixture's session unchanged.
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     with Session(engine) as s:
         yield s

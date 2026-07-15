@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Clip {{ detail.clip.clip_id }} — clipscore{% endblock %}
+{% block body %}
+<h1>Clip {{ detail.clip.clip_id }}</h1>
+<video controls width="360" src="{{ detail.download_url }}"></video>
+<p><a href="{{ detail.download_url }}" download>Download</a></p>
+
+<h2>Requirements</h2>
+<pre>{{ detail.requirements }}</pre>
+
+<h2>Matches</h2>
+{% for m in detail.matches %}
+<div>
+  <strong>#{{ m.rank if m.rank is not none else "?" }}</strong>
+  {{ m.campaign_title or m.campaign_id }}
+  (score {{ "%.3f"|format(m.match_score) if m.match_score is not none else "—" }})
+  {% for w in warnings.get(m.match_id, []) %}<div class="warn">{{ w }}</div>{% endfor %}
+  <p class="muted">Caption: {{ m.suggested_caption or "—" }}</p>
+  <div id="posted-{{ m.match_id }}">
+    <form hx-post="/posted/{{ m.match_id }}" hx-target="#posted-{{ m.match_id }}"
+          hx-swap="outerHTML" method="post" action="/posted/{{ m.match_id }}">
+      <button type="submit">Mark posted</button>
+    </form>
+  </div>
+</div>
+<hr>
+{% endfor %}
+{% endblock %}

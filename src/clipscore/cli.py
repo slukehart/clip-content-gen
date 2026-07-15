@@ -86,6 +86,12 @@ def _clip(args) -> None:
         print(f"queued clip job {job.id} (status={job.status})")
 
 
+def _web(args) -> None:
+    import uvicorn
+    from clipscore.web.app import create_app
+    uvicorn.run(create_app(get_settings()), host=args.host, port=args.port)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="clipscore", description="clipscore pipeline commands")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -114,6 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("--source-type", dest="source_type", default=None)
     cp.add_argument("--source-ref", dest="source_ref", default=None)
     cp.set_defaults(fn=_clip)
+
+    wp = sub.add_parser("web", help="run the local review dashboard")
+    wp.add_argument("--host", default="127.0.0.1")
+    wp.add_argument("--port", type=int, default=8000)
+    wp.set_defaults(fn=_web)
     return p
 
 
