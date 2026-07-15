@@ -328,6 +328,18 @@ the fix is a *no-download passthrough*. Scope (build only this; defer the rest):
     `target_platforms` says where the operator posts.
   - `web/queries.py`/`review_list.html` show the **matched campaign's** platforms
     instead of a per-clip variant.
+- **A clip always matches its originating campaign (2026-07-15, from build review).**
+  A manually-entered clip's target campaign is already known — it is the campaign
+  the `ClipJob` was created under (`clip → SourceAsset.clip_job_id → ClipJob.campaign_id`).
+  So `match_clip` **always includes that originating campaign** (subject only to the
+  length window + active/ingestable eligibility), *independent of creator and of
+  whether a CVS score exists yet* — routing a clip through creator+score *discovery*
+  to re-find its own campaign was a Pipeline-A-era mismatch that silently produced
+  **zero matches** on the `/manual` path (manual campaigns are unscored, and
+  `target_creator` is optional on the form). Discovery of *other* eligible, scored,
+  same-creator campaigns is layered on top with a de-dup. Correspondingly, the
+  no-download passthrough sets `SourceAsset.creator` from the campaign's first
+  `target_creator` when the source itself yields none.
 - **Cost capture:** record Vizard's project-level `creditsUsed`; convert to $ via a
   new `vizard_usd_per_credit` config (default `0.0`, set from the real plan). This
   is the figure B5's cap is set against.
