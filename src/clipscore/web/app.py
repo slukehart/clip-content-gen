@@ -1,11 +1,14 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 
 from clipscore.config import Settings, get_settings
 from clipscore.db.session import SessionLocal, get_engine
+from clipscore.web import actions, queries
 
 _HERE = Path(__file__).resolve().parent
 _TEMPLATES = _HERE / "templates"
@@ -33,5 +36,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/healthz")
     def healthz():
         return {"status": "ok"}
+
+    templates = app.state.templates
+
+    @app.get("/", response_class=HTMLResponse)
+    def approval(request: Request, db: Session = Depends(get_db)):
+        return templates.TemplateResponse("approval.html", {
+            "request": request,
+            "rows": queries.approval_rows(db, settings),
+            "monthly_cost": queries.monthly_cost_usd(db),
+        })
+
+    @app.post("/clip/{campaign_id}", response_class=HTMLResponse)
+    def clip(campaign_id: str, request: Request, db: Session = Depends(get_db)):
+        result = actions.clip_this(db, campaign_id, settings)
+        return templates.TemplateResponse("_clip_button.html", {
+            "request": request, "campaign_id": campaign_id, "result": result,
+        })
 
     return app

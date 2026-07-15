@@ -1,0 +1,19 @@
+{% set cid = campaign_id if campaign_id is defined else r.campaign_id %}
+{% set res = result if result is defined else None %}
+{% set jstatus = (r.job_status if r is defined else None) %}
+<div id="clip-{{ cid }}">
+  {% if res and res.ok %}
+    <span>queued ✓</span>
+  {% elif res and not res.ok %}
+    <span class="warn">{{ res.error }}</span>
+  {% elif jstatus %}
+    <span class="muted">{{ jstatus }}</span>
+  {% elif r is defined and not r.clippable %}
+    <span class="warn">no acquirable source</span>
+  {% else %}
+    <form hx-post="/clip/{{ cid }}" hx-target="#clip-{{ cid }}" hx-swap="outerHTML"
+          method="post" action="/clip/{{ cid }}">
+      <button type="submit">Clip this</button>
+    </form>
+  {% endif %}
+</div>
