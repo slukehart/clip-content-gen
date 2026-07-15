@@ -16,12 +16,25 @@ full pitch; the two design docs below are the source of truth for architecture.
   For approved campaigns, acquires source footage, sends it to a hosted clipping engine,
   matches finished clips back to live campaigns, and presents a local review dashboard.
 
-**Status:** Pipeline A Stages 1–4 are merged (foundation, ingester, scoring, Discord bot —
-see [`plans/`](plans/)). The bot runs end-to-end (`clipscore bot`). Pipeline B is designed
-(`PIPELINE_B_CLIP_FACTORY.md`, updated 2026-07-14 with the DB-audit + web-validated
-findings) and **Stage B1 (schema & LLM extraction) is planned** in
-[`plans/pipeline-b-stage-1-extraction.md`](plans/pipeline-b-stage-1-extraction.md) — not
-yet built. B1 is built before B0 (B0's price quote is an operator task).
+**Status (2026-07-15):** Pipeline A Stages 1–4 are merged. **Pipeline B Stages B1–B4 are
+merged** — B1 (schema + LLM extraction), B2 (acquisition), B3 (clip production + matching +
+captions), B4 (FastAPI review dashboard, `clipscore web`). The full `queued→ready` lifecycle
+runs end-to-end on the CI `FakeClipEngine`. Remaining: **B5** (cost cap / retention
+hardening) and real-integration acceptance.
+
+**Manual-acceptance findings (2026-07-15) — the real integrations are NOT yet proven:**
+- **The committed Vizard adapter (`factory/clip/vizard.py`) is wrong** and does not work
+  against the live API — it never sends the required `videoType`, polls the wrong
+  status codes, reads `clips` (real field is `videos`), and treats `preferLength` as
+  seconds. A live probe established the real contract; the next build is a **minimal
+  Vizard passthrough bridge** (send the public `source_url` + correct `videoType`
+  straight to the URL-only Vizard API; it returns N ranked vertical clips of its own
+  choosing, not one clip per spec). See `PIPELINE_B_CLIP_FACTORY.md` and the
+  `vizard-api-contract` memory.
+- **Source-grabbing is inherently manual.** Real campaigns are dominantly "clip a source
+  video" and the operator supplies the public source URL (via B4's `/manual`); extraction
+  auto-discovers a content-bank URL for ~0% of campaigns (links are gated behind joining).
+  This is the marketplace's shape, not a bug.
 
 ## Non-negotiable principles
 
@@ -39,19 +52,29 @@ These are product constraints, not preferences — do not violate them when writ
 ## Tech stack
 
 Python 3.11+ · SQLite (WAL) · SQLAlchemy 2.x + Alembic · pydantic-settings · structlog ·
-pytest / pytest-asyncio · APScheduler + discord.py (Pipeline A Stage 4, wired).
-(Planned, not yet wired: httpx, FastAPI.)
+pytest / pytest-asyncio · APScheduler + discord.py (Pipeline A Stage 4) · httpx (B2/B3
+acquisition, LLM, Vizard) · FastAPI + uvicorn + Jinja2 + python-multipart (B4 dashboard,
+server-rendered + vendored HTMX) — **all wired.** `yt-dlp` is an optional extra (VOD
+acquirers only, lazy-imported). LLM calls go through a provider-agnostic OpenAI-compatible
+client (default OpenRouter + `moonshotai/kimi-k2`); no vendor SDK.
 
 ## Repository layout
 
 ```
 src/clipscore/
   config.py          # Settings (pydantic-settings) — env-driven config
-  time.py            # time helpers
+  time.py            # time helpers (utcnow_iso, et_month_bounds_utc)
   seed.py            # seed data
+  cli.py             # single argparse CLI (setup/poll/rank/smoke/bot/extract/clip/web)
   db/                # base.py, models.py, session.py (WAL pragmas)
-  ingest/            # base.py (ingester ABC), dto.py, upsert.py
-alembic/             # env.py + versions/ (0001_initial.py)
+  ingest/            # Pipeline A: base.py (ingester ABC), dto.py, upsert.py, detect.py
+  scoring/           # Pipeline A: CVS scoring + board (eligible_latest_scores)
+  bot/               # Pipeline A Stage 4: Discord alert/summary logic + discord_bot.py
+  factory/           # Pipeline B: extract*, enrich, whop, llm, acquire/, clip/
+  jobs/              # Pipeline B: poll.py (scheduler), clipfactory.py (clip-job runner)
+  web/               # Pipeline B4: FastAPI dashboard — app.py, queries.py, warnings.py,
+                     #   actions.py, templates/ (Jinja2 + HTMX), static/
+alembic/             # env.py + versions/ (0001 … 0006_add_outcome_clip_id.py)
 tests/               # pytest suite, conftest.py builds tables from ORM models
 plans/               # phased build briefs (subagent-driven-development)
 IMPLEMENTATION_PLAN.md      # Pipeline A design (source of truth)
@@ -78,6 +101,9 @@ clipscore poll           # one ingest+score cycle against the configured DB
 clipscore rank [--top N] [--niche X]   # ranked CLI output
 clipscore smoke [db]     # live capture check into a throwaway DB
 clipscore bot            # run the Discord bot (see below)
+clipscore extract [--report]   # Pipeline B incremental LLM/Whop enrich sweep (--report = coverage spike)
+clipscore clip <campaign_id> [--source-type --source-ref]   # queue a clip-factory job
+clipscore web [--host 127.0.0.1] [--port 8000]   # run the local review dashboard (Pipeline B4)
 ```
 
 ## Running the Discord bot

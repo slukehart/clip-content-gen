@@ -2,7 +2,7 @@
 
 > Companion to `IMPLEMENTATION_PLAN.md` (Pipeline A — Deal Finder). Pipeline A ranks campaigns by value; **Pipeline B turns the best-ranked campaigns into a review-ready queue of finished clips matched to campaigns**, so the operator does only the manual revenue step (posting). Shares Pipeline A's repo, SQLite database, and single-process topology.
 
-**Date:** 2026-07-13
+**Date:** 2026-07-13 · **Last updated:** 2026-07-15 (B1–B4 merged; live-Vizard + real-data findings; Phase B4.5 added)
 
 ---
 
@@ -255,13 +255,13 @@ Vendor is **selected: Vizard** (verified against official docs — real REST API
 Wire acquire → clip → match → caption as APScheduler jobs; fills the existing `clips`/`clip_matches` tables (no new schema).
 
 - **Provider-agnostic LLM client** `factory/llm.py`: an OpenAI-compatible `/chat/completions` client over `httpx` (already a dep) driven by config `llm_base_url` (default `https://openrouter.ai/api/v1`), `llm_model` (default `moonshotai/kimi-k2`, overridable), `llm_api_key` (`CLIPSCORE_LLM_API_KEY`). Structured extraction uses JSON mode + pydantic validation (portable across open models). **Retrofit B1's `extract_llm.py`** onto this client and **drop the `anthropic` SDK dep** — extraction stays behavior-identical (tested against a fake client in CI). Covers Kimi/DeepSeek/Groq/local/Claude by config alone.
-- **Clip engine** `factory/clip/base.py`: `BaseClipEngine.produce(source_uri, specs) -> list[ProducedClip]` (encapsulates submit → poll-with-backoff → download; timeout/error → job fails). `FakeClipEngine` for CI. Real **Vizard adapter** `factory/clip/vizard.py` reads `vizard_api_key` (`CLIPSCORE_VIZARD_API_KEY`), manual-acceptance-only — this **is B0b**, now unblocked (key obtained). Per-platform variants (`tiktok`/`reels`/`shorts`, doc fallback lengths, narrowed by the campaign's `clip_min/max_len_s`).
+- **Clip engine** `factory/clip/base.py`: `BaseClipEngine.produce(source_uri, specs) -> list[ProducedClip]` (encapsulates submit → poll-with-backoff → download; timeout/error → job fails). `FakeClipEngine` for CI. Real **Vizard adapter** `factory/clip/vizard.py` reads `vizard_api_key` (`CLIPSCORE_VIZARD_API_KEY`), manual-acceptance-only — this **is B0b**. ⚠️ **The committed adapter does NOT work against the live API** (see the 2026-07-15 findings below) — the passthrough bridge in "Phase B4.5" replaces it. Per-platform variants (`tiktok`/`reels`/`shorts`, doc fallback lengths, narrowed by the campaign's `clip_min/max_len_s`).
 - **Clipping job** `factory/clip/produce.py`: `acquired` job → load `source_asset` → `engine.produce()` → write `clips` rows (`produced`) → **delete the source VOD file** (the immediate-post-clip retention deferred from B2; clips kept). Never-raise guard.
 - **Matching** `factory/clip/match.py` (pure, CI-tested): candidates = `status=active` AND `target_creator` overlaps clip creator AND campaign platform ∈ produced variants AND clip length ∈ `[clip_min_len_s, clip_max_len_s]` (hard failures exclude); `match_score` = CVS niche-percentile × spec-fit; write ranked `clip_matches` + `meets_requirements`; clip → `ready`.
 - **Captioning** `factory/clip/caption.py`: deterministic floor that ALWAYS injects an FTC `#ad` disclosure + required handles/hashtags from `caption_rules` (regardless of whether the campaign states it — compliance-first); optional LLM enrichment via `factory/llm.py` when a key is set (manual-acceptance).
 - **Job runner** `jobs/clipfactory.py`: status-driven `process_clip_jobs` advances each `clip_job` (`queued`→acquire→`clipping`→`matching`→`caption`→`ready`), each stage guarded (failure → `failed`+error, never crashes the scheduler), **idempotent** (only picks jobs in the valid prior status — also closes the B2 idempotency note). APScheduler-wired. Minimal operator trigger `clipscore clip <campaign_id> [--source-type --source-ref]` creates a `queued` job with `est_cost_usd` (exercisable before the B4 dashboard).
 
-**Acceptance:** approving a campaign (via `clipscore clip`) drives the full `queued→ready` lifecycle on the `FakeClipEngine` — `ready` clips with ranked `clip_matches` and `#ad`-bearing suggested captions; extraction unchanged post-retrofit; real Vizard + real OpenRouter/Kimi runs verified manual-acceptance with the keys in `.env`. See `plans/pipeline-b-stage-3-clip-production.md`.
+**Acceptance:** approving a campaign (via `clipscore clip`) drives the full `queued→ready` lifecycle on the `FakeClipEngine` — `ready` clips with ranked `clip_matches` and `#ad`-bearing suggested captions; extraction unchanged post-retrofit. See `plans/pipeline-b-stage-3-clip-production.md`. ⚠️ **The real Vizard and real OpenRouter/Kimi runs were NOT actually performed** (the earlier wording here was aspirational) — the live Vizard probe on 2026-07-15 revealed the adapter is wrong; see the findings below.
 
 ### Phase B4 — Review dashboard
 **Planned 2026-07-15** in `plans/pipeline-b-stage-4-review-dashboard.md` — **not yet built.**
@@ -277,8 +277,23 @@ FastAPI + Jinja2 (server-rendered) + one vendored `htmx.min.js` (no CDN/build st
 
 **Acceptance:** e2e — seed a scored clippable campaign → `POST /clip` → run `process_clip_jobs` on `FakeClipEngine` → `GET /review/{clip}` renders → `POST /posted` writes exactly one `outcomes` row + monthly cost readout accurate → a second post fires the duplicate-deliverable warning. Real uvicorn run is manual-acceptance-only.
 
+### Manual-acceptance findings (2026-07-15) — infrastructure reality check
+Probing the live Vizard API and the real ingested campaign data (`clipscore.db`, 405 clipping/both campaigns) surfaced three facts that reshape the remaining work:
+
+1. **The committed Vizard adapter is wrong.** Against the live API (`create`→`{code:2000, projectId}`, `query`→`{code:1000}` processing / `{code:2000, videos:[...], creditsUsed}` done): the adapter never sends the **required** `videoType`, polls the wrong status codes (checks `"success"`/`2`, real is `code:2000`), reads `clips` (real field is `videos`), and passes `preferLength` as seconds (it's a category code). It would poll to timeout and find nothing. **Vizard is URL-only** (no upload) but fetches YouTube/Drive-file/Twitch/direct-mp4 by their original URL (`videoType` 2/3/9/1). It returns **N ranked vertical clips of its own choosing** (10 for a ~14-min source), NOT one clip per spec. Full contract in the `vizard-api-contract` memory.
+2. **Cost model:** `creditsUsed` is per **source-video length** (~14 credits for a ~14-min source → ~10 clips), not per clip. This is the figure B5's cap must be set against.
+3. **Source-grabbing is inherently manual.** 0/405 campaigns had an extracted `content_bank_url`; Google Drive links appear in ~2.7% of ingested text; content banks are gated behind *joining* the campaign. Real campaigns are dominantly "clip a source video" (mine of blurbs: ~98 "clip a video" vs ~16 "pre-approved clips"). The operator supplies the public source URL via B4's `/manual`; auto-discovery is not achievable and manual entry is the designed-for norm.
+
+### Phase B4.5 — Vizard passthrough bridge (next build)
+Make a true end-to-end real-Vizard run possible. Minimal scope (build only this; defer the rest):
+- **Rewrite `factory/clip/vizard.py`** to the real contract: map source → `videoType`, send it (+`ext` for direct files), poll on `code:2000`/`1000`, read `videos`, download each `videoUrl`, record `creditsUsed`.
+- **Reinterpret `produce(source_uri, specs)`**: keep the signature but treat `specs` as "keep the top-N Vizard clips by `viralScore` and label them with the campaign's platform variants" — Vizard picks the clips; we label them. No `match.py` change.
+- **Passthrough:** `run_clipping` passes the public `source_url` (not the local file path) to the engine for passthrough-eligible sources.
+- **Defer:** Drive-*folder* enumeration, a pre-approved-clips (no-engine) review path, and the local-download→temp-public-host fallback for non-fetchable sources (Kick, private Drive) — build when a real case needs them.
+- **Acceptance:** manual-enter a public source URL (`/manual`) → real Vizard render → `ready` clips + ranked matches in the dashboard → mark posted; capture the real `creditsUsed` cost.
+
 ### Phase B5 — Cost & retention hardening
-`MONTHLY_CAP_USD` pause + alert; retention/cleanup jobs; disk guard. **Acceptance:** simulated spend nearing cap pauses new jobs and alerts; retention deletes aged assets.
+`MONTHLY_CAP_USD` pause + alert; retention/cleanup jobs; disk guard. **Acceptance:** simulated spend nearing cap pauses new jobs and alerts; retention deletes aged assets. (Set the cap against the real `creditsUsed`→$ rate established in B4.5.)
 
 ---
 
@@ -291,7 +306,7 @@ FastAPI + Jinja2 (server-rendered) + one vendored `htmx.min.js` (no CDN/build st
 
 ## Open questions / risks
 
-- **Clip-engine vendor** resolved: **Vizard** (verified vs docs), Klap fallback. Residual: confirm Vizard's exact price above 600 upload-min/mo via a sales quote in Phase B0 (estimate ~$70–115/mo at ~15 clips/day); if materially higher, revisit volume or Klap.
-- **Target-creator/spec extraction coverage** from free-text briefs will still be partial even with LLM + Whop-page enrichment (some briefs are title-only; specs may sit inside a Drive doc we don't parse). B1 measures the real coverage (floor/ceiling/+whop) rather than assuming it; low-coverage campaigns produce weaker matches — acceptable, flagged, and surfaced via `extract_provenance`.
+- **Clip-engine vendor** resolved: **Vizard**, Klap fallback. Live API probed 2026-07-15 (see findings above): URL-only, cost = `creditsUsed` per source-video length (~14 credits/~14-min source → ~10 clips). Residual: convert `creditsUsed`→$ from the actual account plan; set the B5 cap against it. The committed adapter needed a rewrite (Phase B4.5).
+- **Target-creator/spec extraction coverage** is **thin in reality** (measured 2026-07-15, not just theorized): 0/405 clipping campaigns had an extracted `content_bank_url`; Drive links appear in ~2.7% of ingested `requirements_raw`; content banks are gated behind joining. Conclusion: **manual source-URL entry (B4 `/manual`) is the norm, not a fallback.** `clipscore extract --report` still measures LLM+Whop coverage, but do not expect it to unlock auto-acquisition at scale. Low-coverage campaigns are handled by the operator, flagged via `extract_provenance`.
 - **Creator-VOD acquisition is legally gray** and campaign-dependent; keep campaign-provided/URL paths as the safer default and treat VOD acquisition as opt-in per authorizing campaign.
 - **Storage/bandwidth** for VODs (multi-GB) must be aggressively cleaned; watch cost.
