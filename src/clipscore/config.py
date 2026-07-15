@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     user_agent: str = "clipscore/0.1 (+personal research; contact via repo)"
     http_timeout_s: int = 60
     llm_api_key: str | None = None
-    llm_model: str = "claude-haiku-4-5"
+    llm_base_url: str = "https://openrouter.ai/api/v1"
+    llm_model: str = "moonshotai/kimi-k2"
     extract_from_whop_page: bool = True
     extract_enabled: bool = True
     # Modest pacing between real (non-injected-fetch) Whop page fetches within
@@ -37,6 +38,11 @@ class Settings(BaseSettings):
     whop_fetch_pacing_s: float = 1.0
     media_dir: str = "media/"
     max_media_gb: float = 50.0
+    vizard_api_key: str | None = None
+    clip_engine: str = "vizard"
+    clip_poll_interval_s: float = 10.0
+    clip_poll_timeout_s: float = 1800.0
+    clip_est_cost_usd: float = 0.0
 
 
 @lru_cache
