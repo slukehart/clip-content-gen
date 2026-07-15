@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     user_agent: str = "clipscore/0.1 (+personal research; contact via repo)"
     http_timeout_s: int = 60
     llm_api_key: str | None = None
-    llm_model: str = "claude-haiku-4-5"
+    llm_base_url: str = "https://openrouter.ai/api/v1"
+    llm_model: str = "moonshotai/kimi-k2"
     extract_from_whop_page: bool = True
     extract_enabled: bool = True
     # Modest pacing between real (non-injected-fetch) Whop page fetches within

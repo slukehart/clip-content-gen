@@ -11,7 +11,7 @@ content) is left `None`/`absent` for the LLM adapter (Task 3) to fill in.
 Provenance values name the SOURCE the value came from, not the extraction
 method: `description | whop_page | allowed_socials | absent`. Never `regex`.
 
-PURE / deterministic module: no network calls, no LLM/anthropic import here.
+PURE / deterministic module: no network calls, no LLM client import here.
 """
 import hashlib
 import json
