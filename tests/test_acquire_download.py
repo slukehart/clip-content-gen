@@ -1,3 +1,4 @@
+import os
 import httpx
 from clipscore.factory.acquire import download
 
@@ -57,3 +58,36 @@ def test_robots_disallow_is_manual(tmp_path):
     r = download.download_direct("https://x.test/v.mp4", str(tmp_path / "a"),
                                  client=_client(h), ua="clipscore", robots_cache={})
     assert r.status == "manual" and r.error == "robots_disallow"
+
+
+class _ExplodingStream(httpx.SyncByteStream):
+    """Yields one real chunk, then blows up mid-stream (simulates a dropped
+    connection partway through a download)."""
+
+    def __iter__(self):
+        yield b"VIDEO" * 100
+        raise httpx.ReadError("connection reset mid-stream")
+
+    def close(self):
+        pass
+
+
+def test_partial_stream_leaves_no_truncated_file_at_final_path(tmp_path):
+    def h(req):
+        robots = _robots_ok(req)
+        if robots:
+            return robots
+        return httpx.Response(200, headers={"content-type": "video/mp4"},
+                              stream=_ExplodingStream())
+
+    dest = str(tmp_path / "cp" / "abc")
+    import pytest
+    with pytest.raises(httpx.ReadError):
+        download.download_direct("https://x.test/v.mp4", dest, client=_client(h),
+                                 ua="clipscore", robots_cache={})
+
+    # No completed result was returned as "acquired", and critically: the
+    # final content-addressed path must never contain a truncated file, nor
+    # should a stray .part file be left behind.
+    assert not os.path.exists(dest + ".mp4")
+    assert not os.path.exists(dest + ".mp4.part")

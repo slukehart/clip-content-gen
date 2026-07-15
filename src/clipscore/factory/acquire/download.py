@@ -7,6 +7,7 @@ bot-challenge (captcha / cf_challenge) from an ordinary non-media HTML page
 spoofing, no CAPTCHA solving, no retries past a halt -- callers surface a
 "manual" or "blocked" status and stop.
 """
+import os
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
@@ -67,12 +68,25 @@ def download_direct(
 
         ext = _ext_for(url, content_type)
         dest_path = dest_path_noext + ext
+        tmp_path = dest_path + ".part"
         storage.ensure_parent(dest_path)
         total_bytes = 0
-        with open(dest_path, "wb") as f:
-            for chunk in resp.iter_bytes():
-                f.write(chunk)
-                total_bytes += len(chunk)
+        try:
+            with open(tmp_path, "wb") as f:
+                for chunk in resp.iter_bytes():
+                    f.write(chunk)
+                    total_bytes += len(chunk)
+        except Exception:
+            # Never leave a partial file at the final content-addressed path
+            # (or the temp path) -- a later job with the same source_ref must
+            # not see a truncated file via storage.find_existing.
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
+
+        os.replace(tmp_path, dest_path)
 
         return AcquisitionResult(
             status="acquired",

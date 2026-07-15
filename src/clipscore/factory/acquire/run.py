@@ -46,21 +46,32 @@ def _acquire_job_inner(session: Session, clip_job: ClipJob, settings: Settings,
             return _fail(session, clip_job, "unauthorized")
         authorizing_campaign_id = clip_job.campaign_id
 
-    # Dedup -- reuse an already-downloaded file without calling the acquirer.
+    # Dedup -- reuse an already-downloaded file without calling the acquirer,
+    # but only if a prior SourceAsset actually vouches for that file. A file
+    # on disk with no matching SourceAsset row is an orphan (e.g. a completed
+    # download whose SourceAsset write failed) and must not be trusted --
+    # fall through to a normal (re)acquire instead of fabricating metadata.
     existing = storage.find_existing(settings.media_dir, clip_job.source_type, clip_job.source_ref)
     if existing:
-        session.add(SourceAsset(
-            clip_job_id=clip_job.id,
-            source_url=clip_job.source_ref,
-            authorizing_campaign_id=authorizing_campaign_id,
-            storage_uri=existing,
-            bytes=os.path.getsize(existing),
-            downloaded_at=now,
-        ))
-        clip_job.status = "acquired"
-        clip_job.error = None
-        session.commit()
-        return clip_job
+        prior = session.execute(
+            select(SourceAsset).where(SourceAsset.storage_uri == existing)
+        ).scalars().first()
+        if prior is not None:
+            session.add(SourceAsset(
+                clip_job_id=clip_job.id,
+                creator=prior.creator,
+                platform=prior.platform,
+                duration_s=prior.duration_s,
+                source_url=clip_job.source_ref,
+                authorizing_campaign_id=authorizing_campaign_id,
+                storage_uri=existing,
+                bytes=os.path.getsize(existing),
+                downloaded_at=now,
+            ))
+            clip_job.status = "acquired"
+            clip_job.error = None
+            session.commit()
+            return clip_job
 
     # Disk guard -- refuse to download if we're already over budget.
     if storage.dir_usage_bytes(settings.media_dir) > settings.max_media_gb * 1_000_000_000:
@@ -120,6 +131,10 @@ def acquire_job(session: Session, clip_job: ClipJob, settings: Settings, *,
     except Exception:
         log.error("acquire_job_crashed", clip_job_id=getattr(clip_job, "id", None))
         try:
+            try:
+                session.rollback()
+            except Exception:
+                pass
             return _fail(session, clip_job, "acquire_crashed")
         except Exception:
             log.error("acquire_job_fail_write_also_failed", clip_job_id=getattr(clip_job, "id", None))

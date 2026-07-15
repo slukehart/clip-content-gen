@@ -81,12 +81,95 @@ def test_dedup_reuses_existing_file_without_calling_acquirer(session, tmp_path):
     j = _job(session)
     stem = storage.stem_key("campaign_provided", j.source_ref)
     existing = tmp_path / f"{stem}.mp4"; existing.parent.mkdir(parents=True); existing.write_bytes(b"y" * 7)
+    # A prior SourceAsset must vouch for the file on disk for dedup to trust
+    # it (an orphan file with no matching row is re-acquired -- see
+    # test_orphan_file_without_source_asset_row_is_reacquired).
+    session.add(SourceAsset(clip_job_id=0, storage_uri=str(existing), bytes=7,
+                             downloaded_at=utcnow_iso())); session.commit()
     class _Boom(BaseAcquirer):
         source_type = "campaign_provided"; requires_authorization = False
         def acquire(self, *a, **k): raise AssertionError("dedup must skip the download")
     run.acquire_job(session, j, _settings(tmp_path), registry={"campaign_provided": _Boom()})
     assert j.status == "acquired"
-    assert session.execute(select(SourceAsset)).scalars().one().storage_uri == str(existing)
+    sa = session.execute(
+        select(SourceAsset).where(SourceAsset.clip_job_id == j.id)
+    ).scalars().one()
+    assert sa.storage_uri == str(existing)
+
+def test_dedup_preserves_platform_creator_duration(session, tmp_path):
+    # First job acquires fresh, recording platform/creator/duration_s.
+    j1 = _job(session)
+    reg = _reg(_FakeAcquirer(AcquisitionResult(
+        status="acquired", platform="youtube", creator="alice", duration_s=99)))
+    run.acquire_job(session, j1, _settings(tmp_path), registry=reg)
+    sa1 = session.execute(select(SourceAsset)).scalars().one()
+    assert sa1.platform == "youtube" and sa1.creator == "alice" and sa1.duration_s == 99
+
+    # Second job with the same source_ref dedups against the file on disk
+    # written by the first job -- it must NOT call the acquirer, and its
+    # SourceAsset must carry the SAME platform/creator/duration_s (not NULL).
+    j2 = _job(session)
+    class _Boom(BaseAcquirer):
+        source_type = "campaign_provided"; requires_authorization = False
+        def acquire(self, *a, **k): raise AssertionError("dedup must skip the download")
+    run.acquire_job(session, j2, _settings(tmp_path), registry={"campaign_provided": _Boom()})
+    assert j2.status == "acquired"
+    sa2 = session.execute(
+        select(SourceAsset).where(SourceAsset.clip_job_id == j2.id)
+    ).scalars().one()
+    assert sa2.platform == "youtube" and sa2.creator == "alice" and sa2.duration_s == 99
+
+
+def test_orphan_file_without_source_asset_row_is_reacquired(session, tmp_path):
+    # A file exists on disk at the content-addressed path (e.g. a prior
+    # download whose SourceAsset write failed) but there is NO SourceAsset
+    # row referencing it. This must NOT be trusted as a dedup hit -- the
+    # acquirer must be called to (re)acquire it properly.
+    from clipscore.factory.acquire import storage
+    j = _job(session)
+    stem = storage.stem_key("campaign_provided", j.source_ref)
+    orphan = tmp_path / f"{stem}.mp4"
+    orphan.parent.mkdir(parents=True)
+    orphan.write_bytes(b"orphan" * 3)
+
+    reg = _reg(_FakeAcquirer(AcquisitionResult(status="acquired", platform="campaign_provided")))
+    run.acquire_job(session, j, _settings(tmp_path), registry=reg)
+    assert j.status == "acquired"
+    sa = session.execute(select(SourceAsset)).scalars().one()
+    # The fake acquirer writes its own file at dest_path + ".mp4" (same path
+    # as the orphan) with bytes == 42, proving the acquirer was actually
+    # invoked rather than the orphan being trusted as-is (orphan was 18 bytes).
+    assert sa.bytes == 42
+
+
+def test_inner_commit_crash_rolls_back_before_fallback_and_still_persists_failed(session, tmp_path, monkeypatch):
+    # Simulate the inner (acquired-branch) commit raising, e.g. because the
+    # session was poisoned by a prior flush error. The outer except must
+    # roll back before attempting the fallback failed-status commit, so that
+    # commit isn't itself doomed by leftover poisoned state.
+    from clipscore.db.models import ClipJob
+    j = _job(session)
+    reg = _reg(_FakeAcquirer(AcquisitionResult(status="acquired", platform="campaign_provided")))
+
+    orig_commit = session.commit
+    calls = {"n": 0}
+
+    def flaky_commit():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("commit boom")
+        return orig_commit()
+
+    monkeypatch.setattr(session, "commit", flaky_commit)
+
+    j2 = run.acquire_job(session, j, _settings(tmp_path), registry=reg)
+    assert j2.status == "failed" and j2.error == "acquire_crashed"
+
+    monkeypatch.undo()
+    session.expire_all()
+    reloaded = session.get(ClipJob, j.id)
+    assert reloaded.status == "failed" and reloaded.error == "acquire_crashed"
+
 
 def test_unknown_source_type_fails(session, tmp_path):
     j = _job(session, source_type="myspace")
