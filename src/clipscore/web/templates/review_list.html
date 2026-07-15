@@ -5,8 +5,7 @@
 {% if not clips %}<p class="muted">No clips ready.</p>{% endif %}
 <ul>
   {% for c in clips %}
-  <li><a href="/review/{{ c.clip_id }}">Clip {{ c.clip_id }} — {{ c.platform_variant or "?" }},
-      {{ c.duration_s or "?" }}s</a></li>
+  <li><a href="/review/{{ c.clip_id }}">Clip {{ c.clip_id }} — {{ c.duration_s or "?" }}s</a></li>
   {% endfor %}
 </ul>
 {% endblock %}

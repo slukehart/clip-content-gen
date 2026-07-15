@@ -26,7 +26,6 @@ class ApprovalRow(BaseModel):
 
 class ReviewClip(BaseModel):
     clip_id: int
-    platform_variant: str | None = None
     duration_s: int | None = None
     status: str
     cost_usd: float | None = None
@@ -79,8 +78,8 @@ def approval_rows(session: Session, settings: Settings) -> list[ApprovalRow]:
 
 def _to_review_clip(session: Session, clip: Clip) -> ReviewClip:
     return ReviewClip(
-        clip_id=clip.id, platform_variant=clip.platform_variant,
-        duration_s=clip.duration_s, status=clip.status, cost_usd=clip.cost_usd,
+        clip_id=clip.id, duration_s=clip.duration_s,
+        status=clip.status, cost_usd=clip.cost_usd,
     )
 
 

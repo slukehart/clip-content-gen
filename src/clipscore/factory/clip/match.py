@@ -1,8 +1,9 @@
 """Clip -> campaign matching -- Pipeline B Stage B3 Task 4.
 
-For a produced `Clip`, find candidate live campaigns (creator + platform +
-length window), score each candidate by CVS niche-percentile x spec-fit,
-and write ranked `ClipMatch` rows.
+For a produced `Clip`, find candidate live campaigns (creator + length
+window), score each candidate by CVS niche-percentile x spec-fit, and write
+ranked `ClipMatch` rows. Platform is a campaign property (`target_platforms`),
+not a clip property, so it is not part of the match gate.
 
 `match_clip` is pure computation (no writes) so it is trivially unit-tested
 and reusable. `run_matching` mirrors `factory/clip/produce.py`'s
@@ -22,8 +23,6 @@ from clipscore.scoring.board import eligible_latest_scores
 from clipscore.time import utcnow_iso
 
 log = structlog.get_logger()
-
-_VARIANT_PLATFORM = {"tiktok": "tiktok", "reels": "instagram", "shorts": "youtube"}
 
 
 def _as_list(raw) -> list:
@@ -57,11 +56,6 @@ def _creator_matches(campaign: Campaign, creator: str) -> bool:
     return False
 
 
-def _platform_matches(campaign: Campaign, platform: str) -> bool:
-    platforms = {p.lower() for p in _as_list(campaign.target_platforms) if isinstance(p, str)}
-    return platform in platforms
-
-
 def _length_ok(campaign: Campaign, duration_s) -> bool:
     lo = campaign.clip_min_len_s
     hi = campaign.clip_max_len_s
@@ -77,21 +71,18 @@ def _length_ok(campaign: Campaign, duration_s) -> bool:
 
 
 def match_clip(session: Session, clip: Clip) -> list[dict]:
-    """Pure computation -- no writes. Returns candidate campaigns for
-    `clip`, ranked by `match_score` descending."""
+    """Pure computation -- no writes. Candidate live campaigns for `clip`,
+    ranked by `match_score` descending. Platform is a campaign property, not a
+    clip property (Vizard clips are format-identical vertical short-form that
+    serve every short-form platform), so matching is on creator + length only;
+    the campaign's target_platforms says where to post."""
     source_asset = session.execute(
         select(SourceAsset).where(SourceAsset.id == clip.source_asset_id)
     ).scalars().one()
 
-    platform = _VARIANT_PLATFORM.get(clip.platform_variant)
-    if platform is None:
-        return []
-
     candidates = []
     for campaign, score in eligible_latest_scores(session):
         if not _creator_matches(campaign, source_asset.creator):
-            continue
-        if not _platform_matches(campaign, platform):
             continue
         if not _length_ok(campaign, clip.duration_s):
             continue

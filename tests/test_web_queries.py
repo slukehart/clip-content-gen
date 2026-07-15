@@ -53,6 +53,7 @@ def test_review_detail_and_ready_clips(session):
     detail = queries.review_detail(session, clip.id)
     assert detail.matches[0].campaign_id == "a"
     assert detail.download_url == f"/media/{clip.id}"
+    assert "target_platforms" in detail.requirements
     assert queries.review_detail(session, 9999) is None
 
 

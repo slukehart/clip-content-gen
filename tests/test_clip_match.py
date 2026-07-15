@@ -37,10 +37,12 @@ def test_length_out_of_window_excludes(session):
     _, clip = _clip(session, dur=200)  # too long
     assert match_clip(session, clip) == []
 
-def test_platform_mismatch_excludes(session):
-    _camp(session, "c1", 0.9)  # target_platforms tiktok
-    _, clip = _clip(session, variant="shorts")  # -> youtube, not accepted
-    assert match_clip(session, clip) == []
+def test_platformless_clip_matches_on_creator_and_length(session):
+    _camp(session, "c1", 0.9, clip_min_len_s=60, clip_max_len_s=120)
+    _, clip = _clip(session, variant=None, dur=90)   # no platform_variant
+    rows = match_clip(session, clip)
+    assert [r["campaign_id"] for r in rows] == ["c1"]
+    assert rows[0]["rank"] == 1 and rows[0]["match_score"] == 0.9
 
 def test_run_matching_writes_rows_and_sets_status(session):
     _camp(session, "c1", 0.9, clip_min_len_s=60, clip_max_len_s=120)

@@ -28,7 +28,7 @@ def _ready_clip(session, cid="a"):
 def test_review_list(session):
     _ready_clip(session)
     resp = _client(session).get("/review")
-    assert resp.status_code == 200 and "tiktok" in resp.text
+    assert resp.status_code == 200 and "60s" in resp.text
 
 
 def test_review_detail_renders_video_and_caption(session):
