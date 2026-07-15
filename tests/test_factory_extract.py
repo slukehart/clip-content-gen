@@ -1,4 +1,6 @@
-from clipscore.factory.extract import RegexExtractor, merge_extractions, ExtractedTargets, apply_to_campaign
+from clipscore.factory.extract import (
+    RegexExtractor, merge_extractions, ExtractedTargets, apply_to_campaign, compute_input_hash,
+)
 from clipscore.db.models import Campaign
 
 
@@ -120,3 +122,18 @@ def test_apply_covers_all_seven_fields(session):
     for field in ("content_bank_url", "target_creator", "target_platforms",
                   "clip_min_len_s", "clip_max_len_s", "caption_rules", "banned_content"):
         assert field in prov
+
+
+def test_apply_stamps_input_hash_of_requirements(session):
+    c = Campaign(source="cr", external_id="z", url="u", status="active",
+                 requirements_raw="Clip @diego.")
+    apply_to_campaign(c, ExtractedTargets())
+    assert c.extract_input_hash == compute_input_hash("Clip @diego.")
+
+
+def test_input_hash_changes_with_requirements_and_is_stable():
+    h1 = compute_input_hash("Clip @diego.")
+    assert h1 == compute_input_hash("Clip @diego.")   # deterministic
+    assert h1 != compute_input_hash("Clip @maria.")   # tracks the input text
+    # None and "" hash identically (both empty payload)
+    assert compute_input_hash(None) == compute_input_hash("")

@@ -2,7 +2,7 @@ import json
 import uuid
 import httpx
 from clipscore.db.models import Campaign
-from clipscore.factory.extract import ExtractedTargets
+from clipscore.factory.extract import ExtractedTargets, compute_input_hash
 from clipscore.factory import enrich
 from clipscore.config import Settings
 from clipscore.time import utcnow_iso
@@ -112,9 +112,12 @@ def test_extract_disabled_is_noop(session):
     assert res is not None
 
 
-def test_enrich_batch_only_stale_skips_already_extracted(session):
+def test_enrich_batch_only_stale_skips_when_hash_matches(session):
+    # c1 was already extracted AND its stored input hash matches its current
+    # requirements -> skipped. c2 was never extracted -> processed.
     c1 = _campaign(external_id="a")
     c1.extract_provenance = json.dumps({"content_bank_url": "absent"})
+    c1.extract_input_hash = compute_input_hash(c1.requirements_raw)
     c2 = _campaign(external_id="b")
     session.add_all([c1, c2])
     session.commit()
@@ -123,6 +126,51 @@ def test_enrich_batch_only_stale_skips_already_extracted(session):
                                  fetch=lambda *a, **k: None)
     assert result["processed"] == 1
     assert c2.extract_provenance is not None
+
+
+def test_enrich_batch_reextracts_when_requirements_changed(session):
+    # Extracted previously, but requirements_raw has since changed, so the
+    # stored hash no longer matches -> re-extracted.
+    c = _campaign(external_id="a")
+    c.extract_provenance = json.dumps({"content_bank_url": "absent"})
+    c.extract_input_hash = compute_input_hash("OLD requirements text")
+    session.add(c)
+    session.commit()
+
+    result = enrich.enrich_batch(session, Settings(_env_file=None), only_stale=True,
+                                 fetch=lambda *a, **k: None)
+    assert result["processed"] == 1
+    # after re-extraction the stored hash tracks the current requirements
+    assert c.extract_input_hash == compute_input_hash(c.requirements_raw)
+
+
+def test_enrich_batch_grandfathers_legacy_extraction_without_hash(session):
+    # Legacy row: extracted before the hash column existed (provenance set,
+    # hash NULL). Not re-extracted on deploy -- grandfathered.
+    c = _campaign(external_id="a")
+    c.extract_provenance = json.dumps({"content_bank_url": "absent"})
+    c.extract_input_hash = None
+    session.add(c)
+    session.commit()
+
+    result = enrich.enrich_batch(session, Settings(_env_file=None), only_stale=True,
+                                 fetch=lambda *a, **k: None)
+    assert result["processed"] == 0
+    assert c.extract_input_hash is None
+
+
+def test_enrich_batch_full_sweep_backfills_hash_on_legacy_rows(session):
+    # only_stale=False re-extracts everything, backfilling the hash on legacy rows.
+    c = _campaign(external_id="a")
+    c.extract_provenance = json.dumps({"content_bank_url": "absent"})
+    c.extract_input_hash = None
+    session.add(c)
+    session.commit()
+
+    result = enrich.enrich_batch(session, Settings(_env_file=None), only_stale=False,
+                                 fetch=lambda *a, **k: None)
+    assert result["processed"] == 1
+    assert c.extract_input_hash == compute_input_hash(c.requirements_raw)
 
 
 def test_enrich_batch_skips_non_clipping_campaigns(session):

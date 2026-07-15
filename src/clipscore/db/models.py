@@ -38,6 +38,7 @@ class Campaign(Base):
     caption_rules: Mapped[str | None] = mapped_column(String, nullable=True)
     banned_content: Mapped[str | None] = mapped_column(String, nullable=True)
     extract_provenance: Mapped[str | None] = mapped_column(String, nullable=True)
+    extract_input_hash: Mapped[str | None] = mapped_column(String, nullable=True)
 
 class CampaignSnapshot(Base):
     __tablename__ = "campaign_snapshots"

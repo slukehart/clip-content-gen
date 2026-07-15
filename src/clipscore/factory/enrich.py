@@ -20,6 +20,7 @@ from clipscore.factory.extract import (
     ExtractedTargets,
     RegexExtractor,
     apply_to_campaign,
+    compute_input_hash,
     merge_extractions,
 )
 from clipscore.factory.whop import fetch_page_text
@@ -112,26 +113,49 @@ def enrich_campaign(session: Session, campaign: Campaign, settings: Settings,
             return ExtractedTargets()
 
 
+def _is_stale(campaign: Campaign) -> bool:
+    """Does this campaign need (re-)extraction?
+
+    - Never extracted (`extract_provenance IS NULL`) -> stale.
+    - Extracted, with a stored input hash that no longer matches a freshly
+      computed one (its `requirements_raw` changed, or `EXTRACT_VERSION` was
+      bumped) -> stale.
+    - Legacy row extracted before the hash column existed (provenance set but
+      `extract_input_hash IS NULL`) -> NOT stale: grandfathered so deploying
+      this change doesn't trigger a one-time re-extraction of every campaign.
+      No poll/CLI path re-extracts these, so they stay grandfathered
+      permanently; the only way to opt one back in is a deliberate full
+      (`only_stale=False`) sweep, which nothing wires today. Acceptable: this
+      matters only for rows extracted by an earlier build, and the cost guard
+      (plan: "Never re-extract all ~405") is why we don't do it automatically.
+    """
+    if campaign.extract_provenance is None:
+        return True
+    if campaign.extract_input_hash is None:
+        return False
+    return campaign.extract_input_hash != compute_input_hash(campaign.requirements_raw)
+
+
 def enrich_batch(session: Session, settings: Settings, only_stale: bool = True,
                  extractor=None, fetch=None) -> dict:
     """Sweep clipping/both campaigns and enrich each one.
 
-    `only_stale=True` (the poll path) selects campaigns that have never been
-    extracted (`extract_provenance IS NULL`). Detecting "requirements_raw
-    changed since last extract" would need a stored hash/marker column we
-    don't have yet -- deferred as a follow-up; `provenance IS NULL` already
-    satisfies the cost guard, since already-extracted campaigns are skipped
-    on every subsequent poll rather than being re-extracted every cycle.
-    `only_stale=False` is the full sweep (manual report path).
+    `only_stale=True` (the poll path) loads all clipping/both campaigns and
+    keeps the ones `_is_stale` flags -- never-extracted, or whose extraction
+    input changed since the last pass (see `_is_stale`). Filtering in Python
+    rather than SQL is cheap: the hash covers short text, and the expensive
+    fetch+LLM still only runs on the stale campaigns. `only_stale=False`
+    re-extracts every clipping/both campaign unconditionally (stamping a hash
+    on each, including legacy rows) -- it exists for a deliberate full
+    re-extraction, but no poll/CLI path invokes it today.
     """
     if not settings.extract_enabled:
         return {"processed": 0, "skipped": "extract_disabled"}
 
     query = select(Campaign).where(Campaign.campaign_type.in_(_CLIPPING_TYPES))
-    if only_stale:
-        query = query.where(Campaign.extract_provenance.is_(None))
-
     campaigns = session.execute(query).scalars().all()
+    if only_stale:
+        campaigns = [c for c in campaigns if _is_stale(c)]
     processed = 0
 
     if fetch is not None:

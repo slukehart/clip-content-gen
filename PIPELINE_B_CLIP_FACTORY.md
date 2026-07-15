@@ -177,6 +177,7 @@ Follows Pipeline A's **Storage conventions** (UUID→TEXT, money→REAL, arrays�
 | caption_rules | TEXT nullable | required handles/hashtags/disclaimers from brief — **including FTC #ad disclosure** (refinement B) |
 | banned_content | TEXT nullable | content prohibitions from brief |
 | extract_provenance | TEXT nullable | JSON: per-field **source** (`description` \| `whop_page` \| `allowed_socials` \| `absent`) — honest coverage tracking; records where a value came from, not which extractor found it. `allowed_socials` marks a field defaulted from A's ingested field, not read from brief text |
+| extract_input_hash | TEXT nullable | `sha256(EXTRACT_VERSION + requirements_raw)`; the poll re-extracts a campaign when this no longer matches (its brief changed, or `EXTRACT_VERSION` was bumped). Rows extracted before this column existed carry a NULL hash and are grandfathered — the poll never re-extracts them (deliberate: avoids a one-time re-extraction of all ~405 on deploy) (migration `0005`) |
 
 ### Reused: `outcomes` (Pipeline A)
 "Mark posted" writes `clips_posted` / `campaign_id` here so B's spend is measured against real logged payouts.

@@ -13,11 +13,28 @@ method: `description | whop_page | allowed_socials | absent`. Never `regex`.
 
 PURE / deterministic module: no network calls, no LLM/anthropic import here.
 """
+import hashlib
 import json
 import re
 from typing import Protocol
 
 from pydantic import BaseModel, Field
+
+# Bump when the extraction logic/prompt changes in a way that should force every
+# campaign to be re-extracted on its next poll. It is folded into the input hash
+# (below), so a bump makes every stored hash stale at once.
+EXTRACT_VERSION = 1
+
+
+def compute_input_hash(requirements_raw: str | None) -> str:
+    """Stable hash of the extraction *input*, stored on the campaign so
+    `enrich_batch` can detect when a re-extraction is needed: the campaign's
+    `requirements_raw` changed, or `EXTRACT_VERSION` was bumped after an
+    extractor improvement. The Whop page text is intentionally NOT part of the
+    input -- it is not stored and is fetched fresh each pass, so it could not be
+    compared at staleness-check time anyway."""
+    payload = f"{EXTRACT_VERSION}\n{requirements_raw or ''}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 _BANK_URL = re.compile(
     r"https?://(?:www\.)?(?:drive\.google\.com|docs\.google\.com|dropbox\.com)/\S+",
@@ -183,3 +200,8 @@ def apply_to_campaign(campaign, extracted: ExtractedTargets) -> None:
 
     provenance = {field: extracted.provenance.get(field, "absent") for field in FIELDS}
     campaign.extract_provenance = json.dumps(provenance)
+
+    # Stamp the input hash alongside provenance so any successful pass (LLM or
+    # regex-fallback) records what it extracted from. enrich_batch compares this
+    # against a freshly computed hash to decide whether to re-extract.
+    campaign.extract_input_hash = compute_input_hash(campaign.requirements_raw)
