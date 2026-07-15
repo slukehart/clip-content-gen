@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -93,5 +93,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return templates.TemplateResponse("_posted.html", {
             "request": request, "result": result,
         })
+
+    @app.get("/manual", response_class=HTMLResponse)
+    def manual_form(request: Request):
+        return templates.TemplateResponse("manual.html", {"request": request, "result": None})
+
+    @app.post("/manual", response_class=HTMLResponse)
+    def manual_submit(request: Request, db: Session = Depends(get_db),
+                      title: str = Form(...), niche: str = Form(""),
+                      content_bank_url: str = Form(""), target_creator: str = Form("")):
+        result = actions.create_manual_campaign(
+            db, title=title, niche=niche or None,
+            content_bank_url=content_bank_url or None,
+            target_creator=target_creator or None, settings=settings,
+        )
+        return templates.TemplateResponse("manual.html", {"request": request, "result": result})
 
     return app

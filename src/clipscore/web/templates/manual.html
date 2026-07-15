@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Manual entry — clipscore{% endblock %}
+{% block body %}
+<h1>Manual campaign entry</h1>
+{% if result %}
+  {% if result.ok and result.job_id %}<p>Created and queued (job {{ result.job_id }}).</p>
+  {% elif result.ok %}<p class="warn">{{ result.error }}</p>
+  {% else %}<p class="warn">{{ result.error }}</p>{% endif %}
+{% endif %}
+<form method="post" action="/manual">
+  <p><label>Title <input name="title" required></label></p>
+  <p><label>Niche <input name="niche"></label></p>
+  <p><label>Content bank URL <input name="content_bank_url" size="50"></label></p>
+  <p><label>Target creator <input name="target_creator"></label></p>
+  <button type="submit">Create + queue</button>
+</form>
+{% endblock %}
