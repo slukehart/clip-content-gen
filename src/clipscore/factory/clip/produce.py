@@ -31,27 +31,24 @@ def _run_clipping_inner(
     session: Session, clip_job: ClipJob, settings: Settings, engine: BaseClipEngine, now: str
 ) -> None:
     source_asset = session.execute(
-        select(SourceAsset).where(
-            SourceAsset.clip_job_id == clip_job.id,
-            SourceAsset.storage_uri.is_not(None),
-        )
+        select(SourceAsset).where(SourceAsset.clip_job_id == clip_job.id)
     ).scalars().one()
 
     campaign = session.execute(
         select(Campaign).where(Campaign.id == clip_job.campaign_id)
     ).scalars().one()
 
-    specs = derive_specs(campaign, settings)
+    spec = derive_specs(campaign, settings)
     dest_dir = f"{settings.media_dir}/clips/{clip_job.id}"
     os.makedirs(dest_dir, exist_ok=True)
 
-    produced = engine.produce(source_asset.storage_uri, specs, dest_dir=dest_dir)
+    produced = engine.produce(source_asset.source_url, spec, dest_dir=dest_dir)
 
     for p in produced:
         session.add(
             Clip(
                 source_asset_id=source_asset.id,
-                platform_variant=p.platform_variant,
+                platform_variant=None,
                 storage_uri=p.storage_uri,
                 duration_s=p.duration_s,
                 transcript=p.transcript,
@@ -64,16 +61,17 @@ def _run_clipping_inner(
         )
     session.commit()
 
-    # Retention: delete the source file only after the clip rows are
-    # durably written, and only on the success path. Best-effort -- a
-    # failure to remove the file must not fail the job.
-    try:
-        os.remove(source_asset.storage_uri)
-    except OSError:
-        log.warning("clip_source_delete_failed", clip_job_id=clip_job.id,
-                    storage_uri=source_asset.storage_uri)
+    # Retention: delete the local source file only if one was downloaded.
+    # A passthrough source has storage_uri=None -- os.remove(None) raises
+    # TypeError (NOT OSError), which the guard below would miss, so skip it.
+    if source_asset.storage_uri:
+        try:
+            os.remove(source_asset.storage_uri)
+        except OSError:
+            log.warning("clip_source_delete_failed", clip_job_id=clip_job.id,
+                        storage_uri=source_asset.storage_uri)
+        source_asset.storage_uri = None
 
-    source_asset.storage_uri = None
     clip_job.status = "produced"
     clip_job.error = None
     session.commit()
