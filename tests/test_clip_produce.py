@@ -1,5 +1,5 @@
 import os, uuid
-from sqlalchemy import select
+from sqlalchemy import select, text
 from clipscore.db.models import ClipJob, SourceAsset, Clip, Campaign
 from clipscore.factory.clip.produce import run_clipping
 from clipscore.factory.clip.base import FakeClipEngine, BaseClipEngine
@@ -39,3 +39,29 @@ def test_clipping_engine_error_marks_failed_never_raises(session, tmp_path):
     out = run_clipping(session, j, _settings(tmp_path), engine=Boom())
     assert out.status == "failed" and out.error
     assert src.exists()  # source not deleted on failure
+
+def test_clipping_commit_failure_never_raises_and_records_failure(session, tmp_path):
+    # The clips-write commit inside the worker fails at flush (constraint
+    # violation / DB lock / disk-full — simulated here by dropping the clips
+    # table so the INSERT errors). In SQLAlchemy 2.0 a failed flush deactivates
+    # the transaction, so recording the failure requires session.rollback()
+    # FIRST — otherwise the guard's own commit() raises PendingRollbackError
+    # and both escapes AND loses the failure record.
+    j, src = _setup(session, tmp_path)
+    session.execute(text("DROP TABLE clips"))
+    session.commit()
+
+    # (a) never raises even though the worker's commit fails hard.
+    out = run_clipping(session, j, _settings(tmp_path), engine=FakeClipEngine())
+    assert out.status == "failed" and out.error
+
+    # (b) the failure is DURABLY persisted. Rolling back here discards any
+    # uncommitted in-memory state, so the re-read reflects only what actually
+    # committed: with the guard's rollback() the failed status is persisted
+    # ("failed"); without it the failure commit raised PendingRollbackError,
+    # nothing committed, and this row is still "acquired" — which is exactly
+    # what makes this test discriminate.
+    session.rollback()
+    session.expire_all()
+    fetched = session.get(ClipJob, j.id)
+    assert fetched.status == "failed" and fetched.error

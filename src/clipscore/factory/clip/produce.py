@@ -92,9 +92,23 @@ def run_clipping(
     try:
         _run_clipping_inner(session, clip_job, settings, resolved_engine, resolved_now)
     except Exception as exc:
-        log.error("clip_job_failed", clip_job_id=clip_job.id, error=str(exc))
-        clip_job.status = "failed"
-        clip_job.error = str(exc)
-        session.commit()
+        # Capture the reason from the exception object itself (no ORM access)
+        # BEFORE touching the session: if the failure came from a `commit()`
+        # inside the worker, SQLAlchemy 2.0 has deactivated the transaction,
+        # and ANY ORM read -- even `clip_job.id` for a log line -- would
+        # trigger a lazy load that raises PendingRollbackError. So
+        # `session.rollback()` must be the FIRST thing we do; only then is it
+        # safe to mutate/commit/read the job. The whole recovery is wrapped
+        # so a DB that refuses even this can never propagate out of the
+        # scheduler (never-raise contract).
+        reason = str(exc)
+        try:
+            session.rollback()
+            clip_job.status = "failed"
+            clip_job.error = reason
+            session.commit()
+            log.error("clip_job_failed", clip_job_id=clip_job.id, error=reason)
+        except Exception:
+            log.error("clip_job_failure_record_failed", error=reason)
 
     return clip_job
