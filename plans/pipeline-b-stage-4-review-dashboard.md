@@ -972,7 +972,7 @@ and the routes:
     <td>{{ r.niche or "" }}</td>
     <td>{{ "%.2f"|format(r.cvs_niche_percentile) if r.cvs_niche_percentile is not none else "—" }}</td>
     <td>${{ "%.2f"|format(r.est_cost_usd) }}</td>
-    <td id="clip-{{ r.campaign_id }}">
+    <td>{# the swap target id lives on the partial's inner <div>, not here #}
       {% include "_clip_button.html" with context %}
     </td>
   </tr>
