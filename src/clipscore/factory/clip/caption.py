@@ -15,6 +15,8 @@ floor is the true guarantee, the LLM is a nice-to-have.
 an inner worker does the real work, and an outer `try/except Exception`
 ensures a captioning failure never propagates out of this job.
 """
+import re
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -26,6 +28,7 @@ from clipscore.factory.llm import LLMClient
 log = structlog.get_logger()
 
 AD_TAG = "#ad"
+_AD_TAG_RE = re.compile(r"(?i)#ad\b")
 
 _SYSTEM_PROMPT = (
     "You write short, engaging social captions for clipped video content. "
@@ -34,11 +37,14 @@ _SYSTEM_PROMPT = (
 
 
 def _ensure_ad_tag(text: str) -> str:
-    """Append AD_TAG to `text` unless already present (case-insensitive)."""
-    if AD_TAG.lower() in text.lower():
+    """Append AD_TAG to `text` unless a genuine `#ad` disclosure is already
+    present. Presence is checked with a word-boundary regex so hashtags like
+    `#addicted` or `#adventure` do NOT count as an existing disclosure --
+    only `#ad` itself (optionally followed by punctuation/whitespace/end of
+    string) does."""
+    if _AD_TAG_RE.search(text):
         return text
-    text = text.rstrip()
-    return f"{text} {AD_TAG}".strip()
+    return f"{text.rstrip()} {AD_TAG}".strip()
 
 
 def caption_floor(campaign: Campaign) -> str:

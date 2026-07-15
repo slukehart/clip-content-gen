@@ -57,6 +57,44 @@ def test_matched_job_is_not_repicked(session, tmp_path):
     res = clipfactory.process_clip_jobs(session, _settings(tmp_path), engine=FakeClipEngine())
     assert res["advanced"] == 0
 
+def test_produced_job_skips_caption_when_matching_fails(session, tmp_path, monkeypatch):
+    now = utcnow_iso()
+    session.add(Campaign(id="c1", source="cr", external_id="e1", status="active",
+                         access_status="ingestable", campaign_type="clipping",
+                         first_seen_at=now, last_seen_at=now,
+                         target_platforms='["tiktok"]', target_creator='["@diego"]')); session.commit()
+    j = ClipJob(campaign_id="c1", source_type="campaign_provided", source_ref="ref",
+                status="produced", created_at=now); session.add(j); session.commit()
+    sa = SourceAsset(clip_job_id=j.id, storage_uri="x.mp4", downloaded_at=now)
+    session.add(sa); session.commit()
+    clip = Clip(source_asset_id=sa.id, platform_variant="tiktok", engine="fake",
+                status="produced", created_at=now)
+    session.add(clip); session.commit()
+
+    def _fake_run_matching(session, clip_job, *, now=None):
+        clip_job.status = "failed"
+        clip_job.error = "matching guard fired"
+        session.commit()
+        return clip_job
+
+    caption_calls = []
+
+    def _fake_run_caption(session, clip_job, settings, *, llm=None):
+        caption_calls.append(clip_job.id)
+        return clip_job
+
+    monkeypatch.setattr(clipfactory, "run_matching", _fake_run_matching)
+    monkeypatch.setattr(clipfactory, "run_caption", _fake_run_caption)
+
+    clipfactory.process_clip_jobs(session, _settings(tmp_path))
+
+    session.refresh(j)
+    session.refresh(clip)
+    assert j.status == "failed"
+    assert caption_calls == []
+    assert clip.status == "produced"
+
+
 def test_stage_crash_marks_failed_never_raises(session, tmp_path):
     now = utcnow_iso()
     j = ClipJob(campaign_id="c1", source_type="campaign_provided", source_ref="ref",

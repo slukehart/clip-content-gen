@@ -89,7 +89,8 @@ def _advance(session: Session, job: ClipJob, settings: Settings, *,
         return run_clipping(session, job, settings, engine=engine, now=now)
     if job.status == "produced":
         job = run_matching(session, job, now=now)
-        job = run_caption(session, job, settings, llm=llm)
+        if job.status == "matched":
+            job = run_caption(session, job, settings, llm=llm)
         return job
     return job
 
