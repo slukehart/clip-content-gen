@@ -1326,12 +1326,29 @@ def test_manual_post_creates_campaign_and_job(session):
 and the e2e `tests/test_web_e2e.py`:
 
 ```python
+import os
+
 from fastapi.testclient import TestClient
 from clipscore.config import Settings
 from clipscore.db.models import Campaign, CampaignScore, Clip, ClipMatch, Outcome
+from clipscore.factory.acquire.base import BaseAcquirer, AcquisitionResult
 from clipscore.factory.clip.base import FakeClipEngine
 from clipscore.jobs.clipfactory import process_clip_jobs
 from clipscore.web.app import create_app, get_db
+
+
+class _FakeAcquirer(BaseAcquirer):
+    """No-network acquirer: writes a tiny local file and reports creator '@me'
+    so the produced clip matches the seeded campaign (see match.py criteria)."""
+    source_type = "campaign_provided"
+    requires_authorization = False
+
+    def acquire(self, source_ref, dest_path, **kw):
+        os.makedirs(os.path.dirname(dest_path + ".mp4"), exist_ok=True)
+        with open(dest_path + ".mp4", "wb") as fh:
+            fh.write(b"x" * 42)
+        return AcquisitionResult(status="acquired", platform="campaign_provided",
+                                 creator="@me", storage_uri=dest_path + ".mp4", bytes=42)
 
 
 def _client(session, settings):
@@ -1343,9 +1360,11 @@ def _client(session, settings):
 
 
 def test_approve_produce_review_post_flow(session, tmp_path):
-    settings = Settings(media_dir=str(tmp_path / "media"), clip_engine="fake",
-                        clip_est_cost_usd=1.0)
-    # a scored, clippable, campaign-provided campaign
+    settings = Settings(_env_file=None, media_dir=str(tmp_path / "media"),
+                        clip_engine="fake", clip_est_cost_usd=1.0, max_media_gb=50.0)
+    # a scored, clippable, campaign-provided campaign. target_creator '@me' +
+    # target_platforms ['tiktok'] + no length window make the produced tiktok
+    # clip (creator '@me', 60s) match this campaign in match_clip.
     session.add(Campaign(id="a", source="s", external_id="a", campaign_type="clipping",
                          title="E2E", niche="gaming", status="active",
                          access_status="ingestable", allowed_socials=["tiktok"],
@@ -1358,32 +1377,39 @@ def test_approve_produce_review_post_flow(session, tmp_path):
 
     client = _client(session, settings)
 
-    # approve -> enqueue
+    # approve -> enqueue a queued clip_job
     assert client.post("/clip/a").status_code == 200
 
-    # produce on the FakeClipEngine (the scheduler's job; web never produces)
-    process_clip_jobs(session, settings, engine=FakeClipEngine())
+    # The scheduler's runner advances ONE stage per call (queued -> acquired ->
+    # produced -> matched/ready), so loop until nothing advances. The web layer
+    # never produces clips; we inject the fake acquirer + FakeClipEngine so no
+    # network / real engine is touched.
+    reg = {"campaign_provided": _FakeAcquirer()}
+    for _ in range(6):
+        res = process_clip_jobs(session, settings, registry=reg, engine=FakeClipEngine())
+        if res["advanced"] == 0:
+            break
 
     ready = session.query(Clip).filter_by(status="ready").all()
     assert ready, "expected at least one ready clip"
     clip = ready[0]
-    match = session.query(ClipMatch).filter_by(clip_id=clip.id).first()
+    match = session.query(ClipMatch).filter_by(clip_id=clip.id, campaign_id="a").first()
     assert match is not None
 
     # review renders
     assert client.get(f"/review/{clip.id}").status_code == 200
 
-    # mark posted -> one outcome
+    # mark posted -> exactly one outcome
     assert client.post(f"/posted/{match.id}").status_code == 200
-    assert session.query(Outcome).filter_by(clip_id=clip.id).count() == 1
+    assert session.query(Outcome).filter_by(clip_id=clip.id, campaign_id="a").count() == 1
 
-    # a second post is idempotent; warning now fires on the review page
+    # a second post is idempotent; the dup warning now fires on the review page
     client.post(f"/posted/{match.id}")
-    assert session.query(Outcome).filter_by(clip_id=clip.id).count() == 1
+    assert session.query(Outcome).filter_by(clip_id=clip.id, campaign_id="a").count() == 1
     assert "Already delivered to this campaign" in client.get(f"/review/{clip.id}").text
 ```
 
-> If `process_clip_jobs` needs the FakeClipEngine wired differently (e.g. via `build_engine` reading `clip_engine="fake"`), the implementer must adapt the call to however Task-6 of B3 exposes engine injection — confirm against `jobs/clipfactory.py` and `factory/clip/base.py`. The invariant the test asserts (enqueue → produce → ready clip + match → review → one outcome → dup-warning) is fixed; the exact engine-injection call is whatever B3 provides.
+> **e2e lifecycle notes (verified against B2/B3 source):** `process_clip_jobs(session, settings, *, registry=None, engine=None, llm=None, now=None)` advances each in-flight job exactly one stage per call, so the loop is required. `registry` (source_type → acquirer) and `engine` are the injection seams — the `_FakeAcquirer` writes a local file and reports `creator="@me"`; combined with `target_creator='["@me"]'`, `target_platforms='["tiktok"]'`, and no length window, `match_clip` yields one candidate (score `0.9 × 0.9`). No `build_engine`/network path is exercised.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
