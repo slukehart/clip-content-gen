@@ -264,7 +264,18 @@ Wire acquire → clip → match → caption as APScheduler jobs; fills the exist
 **Acceptance:** approving a campaign (via `clipscore clip`) drives the full `queued→ready` lifecycle on the `FakeClipEngine` — `ready` clips with ranked `clip_matches` and `#ad`-bearing suggested captions; extraction unchanged post-retrofit; real Vizard + real OpenRouter/Kimi runs verified manual-acceptance with the keys in `.env`. See `plans/pipeline-b-stage-3-clip-production.md`.
 
 ### Phase B4 — Review dashboard
-FastAPI app: approval surface (A's top campaigns + est-cost + "Clip this"), review surface (inline video, ranked matches, requirements, caption, download, mark-posted), manual-entry form, cost/compliance readouts. **Acceptance:** end-to-end — approve → review → mark-posted writes an `outcomes` row; monthly cost readout accurate; duplicate-deliverable warning fires.
+**Planned 2026-07-15** in `plans/pipeline-b-stage-4-review-dashboard.md` — **not yet built.**
+FastAPI + Jinja2 (server-rendered) + one vendored `htmx.min.js` (no CDN/build step), **localhost-only, no auth** (single local user). New deps: `fastapi`, `uvicorn`, `jinja2`, `python-multipart`. CI-pure via Starlette `TestClient` (no running server, no network, no real video).
+
+- **One additive migration** `0006_add_outcome_clip_id` (`down_revision="0005"`): `outcomes.clip_id INTEGER NULL`. Load-bearing for the footage-reuse warning (join `outcome → clip → source_asset_id → sibling clips' outcomes`). Pipeline A's future campaign-level writes leave it NULL — safe (nothing writes `Outcome` today).
+- **`web/queries.py`** (pure, CI-tested): approval list (reuses `scoring/board.eligible_latest_scores`, filtered to `clipping`/`both` + `status=active`, carrying est-cost `settings.clip_est_cost_usd` + current clip_job status); review data (clip + ranked `clip_matches` + requirements + caption); monthly cost readout (**calendar month in ET**, matching the bot's `SUMMARY_HOUR_ET`).
+- **`web/warnings.py`** (pure): **advisory** duplicate-deliverable warnings — (1) source-asset reused across a different campaign's outcome, (2) this campaign already has an outcome. Displays only; never blocks a post (hard cap/pause is B5).
+- **`web/actions.py`** (guarded): "Clip this" & manual-entry both reuse `create_clip_job` (catch its `ValueError` → inline "no acquirable source"); **mark-posted is an idempotent upsert** on `(clip_id, campaign_id)` (never appends — appending would corrupt the dup-warning and the learning loop), sets `clips_posted=1`, other actuals NULL.
+- **Routes:** `GET /` (approval) · `POST /clip/{campaign_id}` (enqueue `queued` job, HTMX swap) · `GET /review`, `GET /review/{clip_id}` (inline `<video>`, matches, requirements, caption, download, dup-warnings, mark-posted) · `POST /posted/{match_id}` · `GET /media/{clip_id}` (`FileResponse`, path resolved **from DB only** — 404 if missing or outside the clips dir; traversal-guarded) · `GET/POST /manual`. Per-request session (never held across a request; SQLite `busy_timeout=5000` already covers the web↔scheduler two-writer case).
+- **CLI:** `clipscore web [--host 127.0.0.1] [--port 8000]` (uvicorn).
+- **"Clip this" only enqueues** — the web layer never produces clips; the scheduler's B3 runner does.
+
+**Acceptance:** e2e — seed a scored clippable campaign → `POST /clip` → run `process_clip_jobs` on `FakeClipEngine` → `GET /review/{clip}` renders → `POST /posted` writes exactly one `outcomes` row + monthly cost readout accurate → a second post fires the duplicate-deliverable warning. Real uvicorn run is manual-acceptance-only.
 
 ### Phase B5 — Cost & retention hardening
 `MONTHLY_CAP_USD` pause + alert; retention/cleanup jobs; disk guard. **Acceptance:** simulated spend nearing cap pauses new jobs and alerts; retention deletes aged assets.
