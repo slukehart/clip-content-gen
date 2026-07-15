@@ -64,6 +64,14 @@ class VizardEngine(BaseClipEngine):
                             timeout=self.settings.http_timeout_s,
                             transport=self._transport)
 
+    def _download_client(self) -> httpx.Client:
+        """A client for streaming clip files from the CDN. Shares the same
+        transport (so tests' `httpx.MockTransport` still intercepts it) but
+        carries none of the Vizard API-key headers -- those must never be
+        sent to the clip CDN host."""
+        return httpx.Client(timeout=self.settings.http_timeout_s,
+                            transport=self._transport)
+
     def produce(self, source_uri: str, spec: ClipSpec, *, dest_dir: str) -> list[ProducedClip]:
         detected = detect_video_type(source_uri)
         if detected is None:
@@ -110,24 +118,25 @@ class VizardEngine(BaseClipEngine):
             credits_used * self.settings.vizard_usd_per_credit / n if n else 0.0
         )
         produced = []
-        for i, clip in enumerate(videos):
-            video_url = clip.get("videoUrl")
-            dest_path = f"{dest_dir}/clip-{i}.mp4"
-            if video_url:
-                storage.ensure_parent(dest_path)
-                with client.stream("GET", video_url) as resp:
-                    resp.raise_for_status()
-                    with open(dest_path, "wb") as f:
-                        for chunk in resp.iter_bytes():
-                            f.write(chunk)
-            ms = clip.get("videoMsDuration")
-            produced.append(ProducedClip(
-                platform_variant=None,
-                storage_uri=dest_path,
-                duration_s=ms // 1000 if ms else None,
-                transcript=clip.get("transcript"),
-                engine="vizard",
-                engine_clip_id=str(clip.get("videoId")) if clip.get("videoId") else None,
-                cost_usd=per_clip_cost,
-            ))
+        with self._download_client() as dl_client:
+            for i, clip in enumerate(videos):
+                video_url = clip.get("videoUrl")
+                dest_path = f"{dest_dir}/clip-{i}.mp4"
+                if video_url:
+                    storage.ensure_parent(dest_path)
+                    with dl_client.stream("GET", video_url) as resp:
+                        resp.raise_for_status()
+                        with open(dest_path, "wb") as f:
+                            for chunk in resp.iter_bytes():
+                                f.write(chunk)
+                ms = clip.get("videoMsDuration")
+                produced.append(ProducedClip(
+                    platform_variant=None,
+                    storage_uri=dest_path,
+                    duration_s=ms // 1000 if ms else None,
+                    transcript=clip.get("transcript"),
+                    engine="vizard",
+                    engine_clip_id=str(clip.get("videoId")) if clip.get("videoId") else None,
+                    cost_usd=per_clip_cost,
+                ))
         return produced

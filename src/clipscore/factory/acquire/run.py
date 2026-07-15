@@ -8,6 +8,7 @@ raises -- any unexpected failure is caught and mapped to
 `status="failed"`/`error="acquire_crashed"`. Mirrors the never-raise pattern
 in `factory/enrich.py::enrich_campaign`.
 """
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -23,6 +24,27 @@ from clipscore.factory.acquire.registry import build_registry, select_acquirer
 from clipscore.time import utcnow_iso
 
 log = structlog.get_logger()
+
+
+def _first_target_creator(raw) -> str | None:
+    """Defensively parse a campaign's `target_creator` column: normally a
+    JSON-array string (e.g. '["@diego"]'), but may already be a list or a
+    bare string. Return the first non-empty entry, else None."""
+    val = raw
+    if isinstance(val, str):
+        try:
+            parsed = json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            parsed = val
+        val = parsed
+    if isinstance(val, list):
+        for entry in val:
+            if isinstance(entry, str) and entry.strip():
+                return entry
+        return None
+    if isinstance(val, str) and val.strip():
+        return val
+    return None
 
 
 def _fail(session: Session, clip_job: ClipJob, error: str) -> ClipJob:
@@ -99,9 +121,14 @@ def _acquire_job_inner(session: Session, clip_job: ClipJob, settings: Settings,
             http_client.close()
 
     if result.status == "acquired":
+        creator = result.creator
+        if not creator and clip_job.campaign_id:
+            camp = session.get(Campaign, clip_job.campaign_id)
+            if camp is not None:
+                creator = _first_target_creator(camp.target_creator)
         session.add(SourceAsset(
             clip_job_id=clip_job.id,
-            creator=result.creator,
+            creator=creator,
             platform=result.platform,
             source_url=result.source_url or clip_job.source_ref,
             authorizing_campaign_id=authorizing_campaign_id,
