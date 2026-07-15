@@ -105,3 +105,52 @@ def test_stage_crash_marks_failed_never_raises(session, tmp_path):
     clipfactory.process_clip_jobs(session, _settings(tmp_path), engine=Boom())
     session.refresh(j)
     assert j.status == "failed" and j.error
+
+
+def test_create_clip_job_routes_youtube_content_bank_to_passthrough(session):
+    from clipscore.config import Settings
+    from clipscore.db.models import Campaign
+    from clipscore.jobs.clipfactory import create_clip_job
+    session.add(Campaign(
+        id="c-yt", source="manual", external_id="c-yt", campaign_type="clipping",
+        status="active", first_seen_at="2026-07-15T00:00:00Z",
+        last_seen_at="2026-07-15T00:00:00Z",
+        content_bank_url="https://www.youtube.com/watch?v=abc",
+    ))
+    session.commit()
+    job = create_clip_job(session, "c-yt", Settings())
+    assert job.source_type == "passthrough"
+    assert job.source_ref == "https://www.youtube.com/watch?v=abc"
+
+
+def test_create_clip_job_keeps_campaign_provided_for_drive_folder(session):
+    # A Drive *folder* is not Vizard-fetchable -> stays campaign_provided.
+    from clipscore.config import Settings
+    from clipscore.db.models import Campaign
+    from clipscore.jobs.clipfactory import create_clip_job
+    session.add(Campaign(
+        id="c-folder", source="manual", external_id="c-folder", campaign_type="clipping",
+        status="active", first_seen_at="2026-07-15T00:00:00Z",
+        last_seen_at="2026-07-15T00:00:00Z",
+        content_bank_url="https://drive.google.com/drive/folders/1AbC",
+    ))
+    session.commit()
+    job = create_clip_job(session, "c-folder", Settings())
+    assert job.source_type == "campaign_provided"
+
+
+def test_create_clip_job_explicit_source_type_is_respected(session):
+    from clipscore.config import Settings
+    from clipscore.db.models import Campaign
+    from clipscore.jobs.clipfactory import create_clip_job
+    session.add(Campaign(
+        id="c-x", source="manual", external_id="c-x", campaign_type="clipping",
+        status="active", first_seen_at="2026-07-15T00:00:00Z",
+        last_seen_at="2026-07-15T00:00:00Z",
+        content_bank_url="https://www.youtube.com/watch?v=abc",
+    ))
+    session.commit()
+    job = create_clip_job(session, "c-x", Settings(),
+                          source_type="campaign_provided", source_ref="https://x/y.mp4")
+    assert job.source_type == "campaign_provided"
+    assert job.source_ref == "https://x/y.mp4"

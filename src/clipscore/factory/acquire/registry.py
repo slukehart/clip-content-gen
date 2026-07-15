@@ -6,12 +6,14 @@
 """
 from clipscore.factory.acquire.base import BaseAcquirer
 from clipscore.factory.acquire.campaign_provided import CampaignProvidedAcquirer
+from clipscore.factory.acquire.passthrough import PassthroughAcquirer
 from clipscore.factory.acquire.url import UrlAcquirer
 from clipscore.factory.acquire.vod import YtDlpAcquirer
 
 
 def build_registry(*, ytdlp_downloader=None) -> dict[str, BaseAcquirer]:
     return {
+        "passthrough": PassthroughAcquirer(),
         "campaign_provided": CampaignProvidedAcquirer(),
         "url": UrlAcquirer(),
         "youtube": YtDlpAcquirer("youtube", ytdlp_downloader),

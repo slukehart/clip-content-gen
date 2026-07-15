@@ -26,7 +26,9 @@ def test_clipping_writes_clips_and_deletes_source(session, tmp_path):
     run_clipping(session, j, _settings(tmp_path), engine=FakeClipEngine())
     assert j.status == "produced"
     clips = session.execute(select(Clip)).scalars().all()
-    assert len(clips) == 1 and clips[0].platform_variant == "tiktok" and clips[0].status == "produced"
+    assert len(clips) == 3
+    assert all(c.platform_variant is None for c in clips)
+    assert all(c.status == "produced" for c in clips)
     assert not src.exists()  # immediate post-clip retention
     sa = session.execute(select(SourceAsset)).scalars().one()
     assert sa.storage_uri is None
@@ -65,3 +67,34 @@ def test_clipping_commit_failure_never_raises_and_records_failure(session, tmp_p
     session.expire_all()
     fetched = session.get(ClipJob, j.id)
     assert fetched.status == "failed" and fetched.error
+
+
+def test_run_clipping_passes_source_url_and_writes_platformless_clips(session, tmp_path):
+    """Passthrough source (storage_uri=None): engine gets the public URL,
+    Clip rows are written with no platform_variant, and no retention delete
+    is attempted on a None path."""
+    session.add(Campaign(
+        id="c1", source="manual", external_id="c1", campaign_type="clipping",
+        status="active", first_seen_at="t", last_seen_at="t",
+        clip_min_len_s=30, clip_max_len_s=90, target_platforms='["tiktok"]',
+    ))
+    j = ClipJob(campaign_id="c1", source_type="passthrough",
+                source_ref="https://youtu.be/abc", status="acquired",
+                created_at="t")
+    session.add(j); session.commit()
+    session.add(SourceAsset(clip_job_id=j.id, creator="@me",
+                            source_url="https://youtu.be/abc",
+                            storage_uri=None, downloaded_at="t"))
+    session.commit()
+
+    captured = {}
+    class _Spy(FakeClipEngine):
+        def produce(self, source_uri, spec, *, dest_dir):
+            captured["uri"] = source_uri
+            return super().produce(source_uri, spec, dest_dir=dest_dir)
+
+    run_clipping(session, j, _settings(tmp_path), engine=_Spy())
+    assert captured["uri"] == "https://youtu.be/abc"   # URL, not a local path
+    assert j.status == "produced"
+    clips = session.query(Clip).all()
+    assert clips and all(c.platform_variant is None for c in clips)

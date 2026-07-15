@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     clip_poll_interval_s: float = 10.0
     clip_poll_timeout_s: float = 1800.0
     clip_est_cost_usd: float = 0.0
+    vizard_usd_per_credit: float = 0.0
 
 
 @lru_cache

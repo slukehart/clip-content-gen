@@ -28,6 +28,7 @@ from clipscore.factory.acquire.run import acquire_job
 from clipscore.factory.clip.caption import run_caption
 from clipscore.factory.clip.match import run_matching
 from clipscore.factory.clip.produce import run_clipping
+from clipscore.factory.clip.videotype import detect_video_type
 from clipscore.time import utcnow_iso
 
 log = structlog.get_logger()
@@ -60,11 +61,17 @@ def create_clip_job(
 
     if source_type is None or source_ref is None:
         if campaign.content_bank_url:
-            source_type, source_ref = "campaign_provided", campaign.content_bank_url
+            if detect_video_type(campaign.content_bank_url) is not None:
+                source_type, source_ref = "passthrough", campaign.content_bank_url
+            else:
+                source_type, source_ref = "campaign_provided", campaign.content_bank_url
         else:
             creators = _as_list(campaign.target_creator)
             if creators:
-                source_type, source_ref = "youtube", creators[0]
+                if detect_video_type(creators[0]) is not None:
+                    source_type, source_ref = "passthrough", creators[0]
+                else:
+                    source_type, source_ref = "youtube", creators[0]
             else:
                 raise ValueError("no acquirable source for campaign")
 
