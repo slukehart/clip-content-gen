@@ -10,6 +10,7 @@ after `pip install -e .` these are real terminal commands:
     clipscore bot       # run the Discord bot (needs CLIPSCORE_DISCORD_TOKEN)
     clipscore extract   # one incremental Pipeline B enrich_batch sweep (only_stale)
     clipscore extract --report   # OPERATOR-RUN: full coverage spike report (needs LLM key)
+    clipscore clip <campaign_id> [--source-type T] [--source-ref R]   # queue a clip-factory job
 
 The configured DB is CLIPSCORE_DB_URL (see config.Settings). `setup` uses the ORM
 metadata directly; production schema upgrades still go through `alembic upgrade head`.
@@ -27,6 +28,7 @@ from clipscore.jobs.smoke import run_smoke
 from clipscore.bot.discord_bot import run_bot
 from clipscore.factory.enrich import enrich_batch
 from clipscore.factory.report import generate_coverage_spike_report
+from clipscore.jobs.clipfactory import create_clip_job
 
 
 def _setup(args) -> None:
@@ -69,6 +71,21 @@ def _extract(args) -> None:
             print(enrich_batch(s, settings, only_stale=True))
 
 
+def _clip(args) -> None:
+    get_engine()
+    with SessionLocal() as s:
+        settings = get_settings()
+        try:
+            job = create_clip_job(
+                s, args.campaign_id, settings,
+                source_type=args.source_type, source_ref=args.source_ref,
+            )
+        except ValueError as exc:
+            print(f"could not queue clip job: {exc}")
+            return
+        print(f"queued clip job {job.id} (status={job.status})")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="clipscore", description="clipscore pipeline commands")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -91,6 +108,12 @@ def build_parser() -> argparse.ArgumentParser:
     xp.add_argument("--report", action="store_true",
                      help="OPERATOR-RUN: full coverage spike report (needs LLM key)")
     xp.set_defaults(fn=_extract)
+
+    cp = sub.add_parser("clip", help="queue a clip-factory job for a campaign")
+    cp.add_argument("campaign_id")
+    cp.add_argument("--source-type", dest="source_type", default=None)
+    cp.add_argument("--source-ref", dest="source_ref", default=None)
+    cp.set_defaults(fn=_clip)
     return p
 
 

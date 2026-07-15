@@ -6,6 +6,7 @@ from clipscore.ingest.contentrewards import ContentrewardsIngester
 from clipscore.ingest.upsert import run_ingest_batch
 from clipscore.scoring.engine import score_all
 from clipscore.factory.enrich import enrich_batch
+from clipscore.jobs.clipfactory import process_clip_jobs
 
 log = structlog.get_logger()
 _MISS_COUNTS: dict[str, int] = {}
@@ -37,4 +38,17 @@ def build_scheduler(session_factory) -> BackgroundScheduler:
         with session_factory() as s:
             run_once(s)
     sched.add_job(job, "interval", minutes=minutes, id="contentrewards_poll")
+
+    def clip_factory_job():
+        with session_factory() as s:
+            try:
+                result = process_clip_jobs(s, get_settings())
+                log.info("clip_factory", **result)
+            except Exception:
+                # Guarded: a clip-factory tick must never crash the
+                # scheduler. process_clip_jobs itself never raises, but
+                # this is defense-in-depth (e.g. failure opening the
+                # session-scoped settings).
+                log.error("clip_factory_tick_failed", exc_info=True)
+    sched.add_job(clip_factory_job, "interval", minutes=minutes, id="clip_factory")
     return sched
