@@ -97,6 +97,7 @@ class Outcome(Base):
     __tablename__ = "outcomes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     campaign_id: Mapped[str] = mapped_column(String, index=True)
+    clip_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     clips_posted: Mapped[int | None] = mapped_column(Integer, nullable=True)
     clips_approved: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_views: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
