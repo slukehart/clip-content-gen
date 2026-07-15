@@ -67,10 +67,14 @@ class LLMClient:
                 raise LLMError(f"LLM response was not valid JSON: {e}") from e
 
             choices = data.get("choices")
-            if not choices:
+            if not isinstance(choices, list) or not choices:
                 raise LLMError("LLM response had no 'choices'")
 
-            return choices[0]["message"]["content"]
+            content = (choices[0] or {}).get("message", {}).get("content")
+            if not isinstance(content, str):
+                raise LLMError("LLM response choice had no usable message content")
+
+            return content
         finally:
             if self._owns_client:
                 client.close()

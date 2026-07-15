@@ -46,6 +46,15 @@ def test_missing_key_raises():
         LLMClient("https://x.test/v1", "m", "", client=_mock(lambda r: httpx.Response(200))).chat_text("s", "u")
 
 
+def test_malformed_but_200_raises_llmerror():
+    import pytest
+    for body in ({"choices": []}, {"choices": [{}]}, {"choices": [{"message": {}}]}):
+        def h(req, _b=body):
+            return httpx.Response(200, json=_b)
+        with pytest.raises(LLMError):
+            LLMClient("https://x.test/v1", "m", "K", client=_mock(h)).chat_text("s", "u")
+
+
 def test_fake_client_returns_canned():
     assert FakeLLMClient(json_result={"k": "v"}).chat_json("s", "u") == {"k": "v"}
     assert FakeLLMClient(text_result="cap").chat_text("s", "u") == "cap"
