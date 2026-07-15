@@ -1,15 +1,21 @@
-"""Real Vizard clipping-engine adapter (Pipeline B Stage B3).
+"""Real Vizard clipping-engine adapter (Pipeline B Stage B4.5).
 
-Manual-acceptance-only: this module talks to the real Vizard REST API over
-the network and is never imported or exercised by the CI test suite (see
-`tests/test_clip_base.py`, which only touches `clip/base.py`). It is loaded
-lazily by `build_engine()` when `settings.clip_engine != "fake"`.
+Rewritten against the real, probed Vizard REST contract (2026-07-15, see the
+`vizard-api-contract` memory) -- the previous version never sent the
+required `videoType`, polled the wrong status codes, and read `clips`
+instead of the real `videos` field. Wire handling (submit/poll/download) is
+now CI-tested against `httpx.MockTransport` in `tests/test_clip_vizard.py`
+-- no real network touches CI. Only a run with a real `CLIPSCORE_VIZARD_API_KEY`
+against the live API is manual-acceptance-only.
 
-Flow: submit the source video for clipping -> poll for completion (bounded
-by `clip_poll_interval_s` / `clip_poll_timeout_s`) -> download each finished
-clip file into `dest_dir` -> map Vizard's clip results to `ProducedClip`.
+Flow: classify the source URL via `detect_video_type` (single source of
+truth, shared with clip-job routing) -> submit for clipping -> poll for
+completion (bounded by `clip_poll_interval_s` / `clip_poll_timeout_s`) ->
+download each finished clip file into `dest_dir` -> map Vizard's `videos`
+results to `ProducedClip`, splitting the project's `creditsUsed` evenly
+across the returned clips.
 
-Operator run (Step 5, manual acceptance -- needs a real API key, never CI):
+Operator run (manual acceptance -- needs a real API key, never CI):
 
     CLIPSCORE_VIZARD_API_KEY=... CLIPSCORE_CLIP_ENGINE=vizard python3 -c "
     from clipscore.config import Settings
@@ -17,8 +23,8 @@ Operator run (Step 5, manual acceptance -- needs a real API key, never CI):
     from clipscore.factory.clip.vizard import VizardEngine
     engine = VizardEngine(Settings())
     clips = engine.produce(
-        'https://example.com/source.mp4',
-        [ClipSpec(platform_variant='tiktok', min_len_s=60, max_len_s=180)],
+        'https://youtu.be/XXXXXXXXXXX',
+        ClipSpec(min_len_s=0, max_len_s=0),
         dest_dir='./media/clips/manual-test',
     )
     print(clips)
@@ -31,12 +37,15 @@ import httpx
 from clipscore.config import Settings
 from clipscore.factory.acquire import storage
 from clipscore.factory.clip.base import BaseClipEngine, ClipSpec, ProducedClip
+from clipscore.factory.clip.videotype import detect_video_type
 
 _API_BASE = "https://elb-api.vizard.ai/hvizard-server-front/open-api/v1"
 
 
 class VizardEngine(BaseClipEngine):
-    """Manual-acceptance-only. Never invoked in CI -- see module docstring."""
+    """Real Vizard adapter. Wire handling is CI-tested via `httpx.MockTransport`
+    (see `tests/test_clip_vizard.py`); only the real-key/real-network run is
+    manual-acceptance-only."""
 
     name = "vizard"
 
@@ -46,43 +55,47 @@ class VizardEngine(BaseClipEngine):
                 "VizardEngine requires settings.vizard_api_key (CLIPSCORE_VIZARD_API_KEY)"
             )
         self.settings = settings
-        self._headers = {"VIZARDAI_API_KEY": settings.vizard_api_key}
+        self._headers = {"VIZARDAI_API_KEY": settings.vizard_api_key,
+                         "Content-Type": "application/json"}
+        self._transport = None  # tests inject an httpx.MockTransport here
 
-    def produce(
-        self, source_uri: str, specs: list[ClipSpec], *, dest_dir: str
-    ) -> list[ProducedClip]:
-        with httpx.Client(
-            base_url=_API_BASE, headers=self._headers, timeout=self.settings.http_timeout_s
-        ) as client:
-            project_id = self._submit(client, source_uri, specs)
-            clip_results = self._poll(client, project_id)
-            return self._download(client, clip_results, specs, dest_dir=dest_dir)
+    def _client(self) -> httpx.Client:
+        return httpx.Client(base_url=_API_BASE, headers=self._headers,
+                            timeout=self.settings.http_timeout_s,
+                            transport=self._transport)
 
-    def _submit(self, client: httpx.Client, source_uri: str, specs: list[ClipSpec]) -> str:
-        # One project per source video; Vizard clips the full source and
-        # returns a set of candidate clips we filter/match to our specs.
-        max_len = max((spec.max_len_s for spec in specs), default=180)
-        resp = client.post(
-            "/project/create",
-            json={
-                "videoUrl": source_uri,
-                "lang": "en",
-                "preferLength": [max_len],
-            },
-        )
+    def produce(self, source_uri: str, spec: ClipSpec, *, dest_dir: str) -> list[ProducedClip]:
+        detected = detect_video_type(source_uri)
+        if detected is None:
+            raise RuntimeError(f"Vizard cannot fetch source by URL: {source_uri!r}")
+        video_type, ext = detected
+        with self._client() as client:
+            project_id = self._submit(client, source_uri, video_type, ext)
+            videos, credits_used = self._poll(client, project_id)
+            return self._download(client, videos, credits_used, dest_dir=dest_dir)
+
+    def _submit(self, client, source_uri, video_type, ext):
+        payload = {"videoUrl": source_uri, "videoType": video_type,
+                   "lang": "en", "preferLength": [0]}
+        if video_type == 1:
+            payload["ext"] = ext or "mp4"
+        resp = client.post("/project/create", json=payload)
         resp.raise_for_status()
-        return resp.json()["projectId"]
+        data = resp.json()
+        if data.get("code") != 2000 or "projectId" not in data:
+            raise RuntimeError(f"Vizard create rejected: {data}")
+        return data["projectId"]
 
-    def _poll(self, client: httpx.Client, project_id: str) -> list[dict]:
+    def _poll(self, client, project_id):
         deadline = time.monotonic() + self.settings.clip_poll_timeout_s
         while True:
             resp = client.get(f"/project/query/{project_id}")
             resp.raise_for_status()
             data = resp.json()
-            status = data.get("status")
-            if status == "success" or status == 2:
-                return data.get("clips", [])
-            if status in ("failed", 1) or status == -1:
+            code = data.get("code")
+            if code == 2000:
+                return data.get("videos", []), data.get("creditsUsed", 0)
+            if code != 1000:
                 raise RuntimeError(f"Vizard project {project_id} failed: {data}")
             if time.monotonic() >= deadline:
                 raise TimeoutError(
@@ -91,19 +104,15 @@ class VizardEngine(BaseClipEngine):
                 )
             time.sleep(self.settings.clip_poll_interval_s)
 
-    def _download(
-        self,
-        client: httpx.Client,
-        clip_results: list[dict],
-        specs: list[ClipSpec],
-        *,
-        dest_dir: str,
-    ) -> list[ProducedClip]:
+    def _download(self, client, videos, credits_used, *, dest_dir):
+        n = len(videos)
+        per_clip_cost = (
+            credits_used * self.settings.vizard_usd_per_credit / n if n else 0.0
+        )
         produced = []
-        for i, spec in enumerate(specs):
-            clip = clip_results[i] if i < len(clip_results) else {}
+        for i, clip in enumerate(videos):
             video_url = clip.get("videoUrl")
-            dest_path = f"{dest_dir}/{spec.platform_variant}.mp4"
+            dest_path = f"{dest_dir}/clip-{i}.mp4"
             if video_url:
                 storage.ensure_parent(dest_path)
                 with client.stream("GET", video_url) as resp:
@@ -111,15 +120,14 @@ class VizardEngine(BaseClipEngine):
                     with open(dest_path, "wb") as f:
                         for chunk in resp.iter_bytes():
                             f.write(chunk)
-            produced.append(
-                ProducedClip(
-                    platform_variant=spec.platform_variant,
-                    storage_uri=dest_path,
-                    duration_s=clip.get("videoMsDuration", 0) // 1000 if clip.get("videoMsDuration") else None,
-                    transcript=clip.get("transcript"),
-                    engine="vizard",
-                    engine_clip_id=str(clip.get("videoId")) if clip.get("videoId") else None,
-                    cost_usd=self.settings.clip_est_cost_usd,
-                )
-            )
+            ms = clip.get("videoMsDuration")
+            produced.append(ProducedClip(
+                platform_variant=None,
+                storage_uri=dest_path,
+                duration_s=ms // 1000 if ms else None,
+                transcript=clip.get("transcript"),
+                engine="vizard",
+                engine_clip_id=str(clip.get("videoId")) if clip.get("videoId") else None,
+                cost_usd=per_clip_cost,
+            ))
         return produced
