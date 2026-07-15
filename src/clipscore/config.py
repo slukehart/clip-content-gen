@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     # Global Constraints ("modest pacing"). Not applied when a fake `fetch` is
     # injected (tests stay fast).
     whop_fetch_pacing_s: float = 1.0
+    media_dir: str = "media/"
+    max_media_gb: float = 50.0
 
 
 @lru_cache

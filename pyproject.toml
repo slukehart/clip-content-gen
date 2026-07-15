@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+media = ["yt-dlp>=2024.8"]   # optional; VOD acquirers only, lazy-imported. Pin the exact version at install time — yt-dlp breaks often.
 
 [project.scripts]
 clipscore = "clipscore.cli:main"
