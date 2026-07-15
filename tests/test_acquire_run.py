@@ -143,10 +143,22 @@ def test_orphan_file_without_source_asset_row_is_reacquired(session, tmp_path):
 
 
 def test_inner_commit_crash_rolls_back_before_fallback_and_still_persists_failed(session, tmp_path, monkeypatch):
-    # Simulate the inner (acquired-branch) commit raising, e.g. because the
-    # session was poisoned by a prior flush error. The outer except must
-    # roll back before attempting the fallback failed-status commit, so that
-    # commit isn't itself doomed by leftover poisoned state.
+    # Simulate the acquired-branch commit (run.py's `_acquire_job_inner`,
+    # after `session.add(SourceAsset(...))` is pending) raising -- e.g.
+    # because the session was poisoned by a prior flush error. The outer
+    # except must roll back that pending SourceAsset before attempting the
+    # fallback failed-status commit.
+    #
+    # This is only a real test of the rollback if there's something pending
+    # for rollback to discard. WITH `session.rollback()` (current code): the
+    # pending SourceAsset add is discarded, then the fallback `_fail` commit
+    # persists only the ClipJob as failed -- zero SourceAsset rows. WITHOUT
+    # it: the pending SourceAsset add is still attached to the session, so
+    # the fallback commit (our flaky_commit's second call, which delegates
+    # to the real commit) flushes it right along with the ClipJob update,
+    # leaving an orphan SourceAsset row behind. So asserting "zero
+    # SourceAsset rows" is what actually distinguishes the two behaviors --
+    # the ClipJob-is-failed assertion alone holds either way.
     from clipscore.db.models import ClipJob
     j = _job(session)
     reg = _reg(_FakeAcquirer(AcquisitionResult(status="acquired", platform="campaign_provided")))
@@ -157,6 +169,8 @@ def test_inner_commit_crash_rolls_back_before_fallback_and_still_persists_failed
     def flaky_commit():
         calls["n"] += 1
         if calls["n"] == 1:
+            # Fires on the acquired-branch commit in run.py, i.e. AFTER
+            # `session.add(SourceAsset(...))` has made it pending.
             raise RuntimeError("commit boom")
         return orig_commit()
 
@@ -169,6 +183,12 @@ def test_inner_commit_crash_rolls_back_before_fallback_and_still_persists_failed
     session.expire_all()
     reloaded = session.get(ClipJob, j.id)
     assert reloaded.status == "failed" and reloaded.error == "acquire_crashed"
+
+    # Discriminating assertion: the pending SourceAsset from the crashed
+    # acquired-branch commit must NOT have survived. Without
+    # `session.rollback()` in the outer except, this row would exist
+    # (persisted as an orphan by the fallback commit).
+    assert session.execute(select(SourceAsset)).scalars().all() == []
 
 
 def test_unknown_source_type_fails(session, tmp_path):
