@@ -285,12 +285,58 @@ Probing the live Vizard API and the real ingested campaign data (`clipscore.db`,
 3. **Source-grabbing is inherently manual.** 0/405 campaigns had an extracted `content_bank_url`; Google Drive links appear in ~2.7% of ingested text; content banks are gated behind *joining* the campaign. Real campaigns are dominantly "clip a source video" (mine of blurbs: ~98 "clip a video" vs ~16 "pre-approved clips"). The operator supplies the public source URL via B4's `/manual`; auto-discovery is not achievable and manual entry is the designed-for norm.
 
 ### Phase B4.5 — Vizard passthrough bridge (next build)
-Make a true end-to-end real-Vizard run possible. Minimal scope (build only this; defer the rest):
-- **Rewrite `factory/clip/vizard.py`** to the real contract: map source → `videoType`, send it (+`ext` for direct files), poll on `code:2000`/`1000`, read `videos`, download each `videoUrl`, record `creditsUsed`.
-- **Reinterpret `produce(source_uri, specs)`**: keep the signature but treat `specs` as "keep the top-N Vizard clips by `viralScore` and label them with the campaign's platform variants" — Vizard picks the clips; we label them. No `match.py` change.
-- **Passthrough:** `run_clipping` passes the public `source_url` (not the local file path) to the engine for passthrough-eligible sources.
-- **Defer:** Drive-*folder* enumeration, a pre-approved-clips (no-engine) review path, and the local-download→temp-public-host fallback for non-fetchable sources (Kick, private Drive) — build when a real case needs them.
-- **Acceptance:** manual-enter a public source URL (`/manual`) → real Vizard render → `ready` clips + ranked matches in the dashboard → mark posted; capture the real `creditsUsed` cost.
+Make a true end-to-end real-Vizard run possible. The committed pipeline's core
+mistake is that it **downloads the source to a local file and hands Vizard that
+local path** — but Vizard is **URL-only** and fetches the source itself by its
+public URL. So the acquire-then-clip model is wrong for URL-fetchable sources;
+the fix is a *no-download passthrough*. Scope (build only this; defer the rest):
+
+- **`detect_video_type(url) -> (videoType, ext) | None`** — one pure, CI-tested
+  helper mapping a URL to Vizard's `videoType` (2=YouTube, 3=Drive-file,
+  9=Twitch, 4=Vimeo, 1=direct-file+`ext`; unsupported → `None`). Used by **both**
+  job-routing and the adapter so the mapping can't drift (drift is part of what
+  broke the original adapter).
+- **`PassthroughAcquirer`** (new `source_type="passthrough"`, **no download**):
+  validate the URL via `detect_video_type`, record a `SourceAsset`
+  (`source_url=<url>`, `storage_uri=None`) and set the job `acquired`;
+  unsupported URL → `manual`/fail with a clear error. CI-tested (pure, no network).
+- **`create_clip_job` routing:** when the resolved source URL maps to a
+  `videoType`, queue it as `passthrough` (not `campaign_provided`, whose
+  `download_direct` can't fetch a YouTube/Twitch URL).
+- **`run_clipping` fix:** select the job's `SourceAsset` **without** requiring
+  `storage_uri`; pass `source_asset.source_url` (the public URL) to the engine
+  **unconditionally** (a URL-only engine never wants a local path); guard the
+  retention delete with `if storage_uri:` (a `None` path → `os.remove(None)`
+  raises **TypeError**, which the `except OSError` would miss and the outer guard
+  would turn into a failed job).
+- **Rewrite `factory/clip/vizard.py`** to the real contract: `detect_video_type`
+  → send `{videoUrl, videoType, lang, preferLength:[0]}` (+`ext` for direct
+  files), poll on `code:2000` (done) / `1000` (processing), read `videos`,
+  download each `videoUrl`, record `creditsUsed`. Wire call stays
+  manual-acceptance-only; everything around it is CI-tested via `FakeClipEngine`.
+- **Engine model reshape:** `produce(source_url, …) -> list[ProducedClip]` returns
+  **one clip per Vizard clip** — Vizard picks the clips; we keep them. Vizard
+  returns N *format-identical* vertical short-form clips, not one-per-platform.
+- **Platform is a campaign property, not a clip property (Decision B, 2026-07-15).**
+  Because Vizard's clips are format-identical and postable to any short-form
+  platform, `platform_variant` is dropped from the clip-production path:
+  - `ProducedClip`/`Clip.platform_variant` is left **nullable and unused** (written
+    `NULL`) — **no migration** (dropping a SQLite column is a table rebuild for
+    zero gain); the column stays for back-compat.
+  - `match.py` **drops the platform gate**: a clip matches a live campaign on
+    creator + length (`clip_min/max_len_s`) only; the campaign's
+    `target_platforms` says where the operator posts.
+  - `web/queries.py`/`review_list.html` show the **matched campaign's** platforms
+    instead of a per-clip variant.
+- **Cost capture:** record Vizard's project-level `creditsUsed`; convert to $ via a
+  new `vizard_usd_per_credit` config (default `0.0`, set from the real plan). This
+  is the figure B5's cap is set against.
+- **Defer:** Drive-*folder* enumeration, a pre-approved-clips (no-engine) review
+  path, and the local-download→temp-public-host fallback for non-fetchable sources
+  (Kick, private Drive) — build when a real case needs them.
+- **Acceptance:** manual-enter a public source URL (`/manual`) → real Vizard render
+  → `ready` clips + ranked matches in the dashboard → mark posted; capture the real
+  `creditsUsed` cost.
 
 ### Phase B5 — Cost & retention hardening
 `MONTHLY_CAP_USD` pause + alert; retention/cleanup jobs; disk guard. **Acceptance:** simulated spend nearing cap pauses new jobs and alerts; retention deletes aged assets. (Set the cap against the real `creditsUsed`→$ rate established in B4.5.)
