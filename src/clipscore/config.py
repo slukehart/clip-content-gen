@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     whop_fetch_pacing_s: float = 1.0
     media_dir: str = "media/"
     max_media_gb: float = 50.0
+    vizard_api_key: str | None = None
+    clip_engine: str = "vizard"
+    clip_poll_interval_s: float = 10.0
+    clip_poll_timeout_s: float = 1800.0
+    clip_est_cost_usd: float = 0.0
 
 
 @lru_cache
