@@ -117,6 +117,7 @@ def process_clip_jobs(
     resolved_now = now or utcnow_iso()
     jobs = session.execute(
         select(ClipJob).where(ClipJob.status.in_(_ADVANCEABLE_STATUSES))
+        .limit(settings.clip_jobs_per_tick)
     ).scalars().all()
 
     advanced = 0

@@ -44,8 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def approval(request: Request, db: Session = Depends(get_db)):
-        return templates.TemplateResponse("approval.html", {
-            "request": request,
+        return templates.TemplateResponse(request, "approval.html", {
             "rows": queries.approval_rows(db, settings),
             "monthly_cost": queries.monthly_cost_usd(db),
         })
@@ -53,14 +52,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/clip/{campaign_id}", response_class=HTMLResponse)
     def clip(campaign_id: str, request: Request, db: Session = Depends(get_db)):
         result = actions.clip_this(db, campaign_id, settings)
-        return templates.TemplateResponse("_clip_button.html", {
-            "request": request, "campaign_id": campaign_id, "result": result,
+        return templates.TemplateResponse(request, "_clip_button.html", {
+            "campaign_id": campaign_id, "result": result,
         })
 
     @app.get("/review", response_class=HTMLResponse)
     def review_list(request: Request, db: Session = Depends(get_db)):
-        return templates.TemplateResponse("review_list.html", {
-            "request": request, "clips": queries.ready_clips(db),
+        return templates.TemplateResponse(request, "review_list.html", {
+            "clips": queries.ready_clips(db),
         })
 
     @app.get("/review/{clip_id}", response_class=HTMLResponse)
@@ -70,8 +69,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404)
         warns = {m.match_id: dupwarn.duplicate_warnings(db, clip_id, m.campaign_id)
                  for m in detail.matches}
-        return templates.TemplateResponse("review.html", {
-            "request": request, "detail": detail, "warnings": warns,
+        return templates.TemplateResponse(request, "review.html", {
+            "detail": detail, "warnings": warns,
         })
 
     @app.get("/media/{clip_id}")
@@ -90,13 +89,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/posted/{match_id}", response_class=HTMLResponse)
     def posted(match_id: int, request: Request, db: Session = Depends(get_db)):
         result = actions.mark_posted(db, match_id)
-        return templates.TemplateResponse("_posted.html", {
-            "request": request, "result": result,
+        return templates.TemplateResponse(request, "_posted.html", {
+            "result": result,
         })
 
     @app.get("/manual", response_class=HTMLResponse)
     def manual_form(request: Request):
-        return templates.TemplateResponse("manual.html", {"request": request, "result": None})
+        return templates.TemplateResponse(request, "manual.html", {"result": None})
 
     @app.post("/manual", response_class=HTMLResponse)
     def manual_submit(request: Request, db: Session = Depends(get_db),
@@ -109,6 +108,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             content_bank_url=content_bank_url or None,
             target_creator=target_creator or None, est_minutes=est_minutes, settings=settings,
         )
-        return templates.TemplateResponse("manual.html", {"request": request, "result": result})
+        return templates.TemplateResponse(request, "manual.html", {"result": result})
 
     return app

@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     hours_per_clip: float = 0.75
     raw_retention_days: int = 14
     clip_retention_days: int = 14  # age sweep for produced clip files (clips-only; passthrough keeps no source)
+    clip_jobs_per_tick: int = 5  # max clip jobs advanced per process_clip_jobs pass
     discord_token: str | None = None
     alert_percentile: float = 0.90
     min_niche_sample: int = 5

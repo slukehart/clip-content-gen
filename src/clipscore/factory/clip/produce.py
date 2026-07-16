@@ -51,7 +51,7 @@ def _run_clipping_inner(
     ).scalars().one()
 
     spec = derive_specs(campaign, settings)
-    dest_dir = f"{settings.media_dir}/clips/{clip_job.id}"
+    dest_dir = os.path.join(settings.media_dir, "clips", str(clip_job.id))
     os.makedirs(dest_dir, exist_ok=True)
 
     produced = engine.produce(source_asset.source_url, spec, dest_dir=dest_dir)
