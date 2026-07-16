@@ -48,8 +48,9 @@ def _poll(args) -> None:
 
 def _rank(args) -> None:
     get_engine()
+    niches = None if args.niche else get_settings().target_niche_set
     with SessionLocal() as s:
-        print(format_table(ranked_rows(s, top=args.top, niche=args.niche)))
+        print(format_table(ranked_rows(s, top=args.top, niche=args.niche, niches=niches)))
 
 
 def _smoke(args) -> None:

@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     clip_poll_timeout_s: float = 1800.0
     clip_est_cost_usd: float = 0.0
     vizard_usd_per_credit: float = 0.0
+    # Comma-separated niches to restrict the rank board + dashboard to (your
+    # "lane"). Empty = no filter (show every niche). Non-destructive: campaigns
+    # of other niches stay in the DB, just hidden. Widen your lane by adding to
+    # this list.
+    target_niches: str = ""
     monthly_cap_credits: int = 0  # 0 = uncapped; else block paid jobs projected over this in the ET month
     vizard_ratio_of_clip: int = 1   # 1=9:16, 2=1:1, 3=4:5, 4=16:9
     vizard_subtitle: bool = True
@@ -54,6 +59,12 @@ class Settings(BaseSettings):
     vizard_emoji: bool = True
     vizard_broll: bool = True
     vizard_remove_silence: bool = True
+
+    @property
+    def target_niche_set(self) -> frozenset[str]:
+        """`target_niches` parsed into a normalized (lowercased, trimmed) set.
+        Empty set means no niche filter is applied."""
+        return frozenset(n.strip().lower() for n in self.target_niches.split(",") if n.strip())
 
 
 @lru_cache
