@@ -87,6 +87,13 @@ def _clip(args) -> None:
         print(f"queued clip job {job.id} (status={job.status})")
 
 
+def _prune(args) -> None:
+    get_engine()
+    from clipscore.factory.clip.retention import sweep_clip_retention
+    with SessionLocal() as s:
+        print(sweep_clip_retention(s, get_settings()))
+
+
 def _web(args) -> None:
     import uvicorn
     from clipscore.web.app import create_app
@@ -123,6 +130,8 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("--source-minutes", dest="source_minutes", type=int, default=None,
                     help="source video length in minutes (feeds the monthly credit cap)")
     cp.set_defaults(fn=_clip)
+
+    sub.add_parser("prune", help="delete clip files older than CLIPSCORE_CLIP_RETENTION_DAYS").set_defaults(fn=_prune)
 
     wp = sub.add_parser("web", help="run the local review dashboard")
     wp.add_argument("--host", default="127.0.0.1")

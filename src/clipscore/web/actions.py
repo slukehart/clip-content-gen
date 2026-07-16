@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from clipscore.config import Settings
-from clipscore.db.models import Campaign, ClipMatch, Outcome
+from clipscore.db.models import Campaign, Clip, ClipMatch, Outcome
 from clipscore.jobs.clipfactory import create_clip_job
 from clipscore.time import utcnow_iso
 
@@ -42,6 +42,10 @@ def mark_posted(session: Session, match_id: int, *, now: str | None = None) -> C
             campaign_id=match.campaign_id, clip_id=match.clip_id, clips_posted=1,
             logged_at=now or utcnow_iso(),
         ))
+    from clipscore.factory.clip.retention import delete_clip_file
+    clip = session.get(Clip, match.clip_id)
+    if clip is not None:
+        delete_clip_file(clip)
     session.commit()
     return ClipResult(ok=True, status="posted")
 
