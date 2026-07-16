@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     clip_poll_timeout_s: float = 1800.0
     clip_est_cost_usd: float = 0.0
     vizard_usd_per_credit: float = 0.0
+    monthly_cap_credits: int = 0  # 0 = uncapped; else block paid jobs projected over this in the ET month
 
 
 @lru_cache
