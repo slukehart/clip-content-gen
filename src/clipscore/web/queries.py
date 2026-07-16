@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from clipscore.config import Settings
 from clipscore.db.models import Campaign, ClipJob, Clip, ClipMatch
+from clipscore.factory.clip.cost import month_credits_used
 from clipscore.scoring.board import eligible_latest_scores
 from clipscore.time import et_month_bounds_utc
 from pydantic import BaseModel
@@ -133,3 +134,25 @@ def monthly_cost_usd(session: Session, now=None) -> float:
         )
     ).scalars().all()
     return float(sum(c or 0.0 for c in clips))
+
+
+class CreditStatus(BaseModel):
+    used: int
+    cap: int                    # 0 = uncapped
+    remaining: int | None       # None when uncapped
+    pct: float | None           # 0-100, clamped; None when uncapped
+
+
+def monthly_credit_status(session: Session, settings: Settings, now=None) -> CreditStatus:
+    """Vizard credits consumed this ET month vs. the configured monthly cap.
+    Mirrors the B5 cost gate's accounting (real `credits_used` on clip_jobs).
+    `cap == 0` means uncapped -> remaining/pct are None."""
+    used = month_credits_used(session, now)
+    cap = settings.monthly_cap_credits
+    if cap > 0:
+        remaining = max(0, cap - used)
+        pct = min(100.0, used / cap * 100.0)
+    else:
+        remaining = None
+        pct = None
+    return CreditStatus(used=used, cap=cap, remaining=remaining, pct=pct)
