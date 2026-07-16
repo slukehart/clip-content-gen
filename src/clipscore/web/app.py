@@ -47,6 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return templates.TemplateResponse(request, "approval.html", {
             "rows": queries.approval_rows(db, settings),
             "monthly_cost": queries.monthly_cost_usd(db),
+            "credits": queries.monthly_credit_status(db, settings),
         })
 
     @app.post("/clip/{campaign_id}", response_class=HTMLResponse)

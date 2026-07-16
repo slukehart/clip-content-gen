@@ -3,6 +3,35 @@
 {% block body %}
 <h1>Approve campaigns</h1>
 <p class="muted">Monthly clip cost so far: ${{ "%.2f"|format(monthly_cost) }}</p>
+<div class="credits">
+  {% if credits.cap > 0 %}
+    <p class="muted">Vizard credits this month:
+      <strong>{{ credits.used }} / {{ credits.cap }}</strong>
+      ({{ "%.0f"|format(credits.pct) }}%) — {{ credits.remaining }} left</p>
+    <div class="credit-bar" role="progressbar"
+         aria-valuenow="{{ "%.0f"|format(credits.pct) }}" aria-valuemin="0" aria-valuemax="100"
+         aria-label="Vizard credits used this month">
+      <div class="credit-bar-fill{% if credits.pct >= 90 %} danger{% elif credits.pct >= 75 %} warn{% endif %}"
+           style="width: {{ "%.1f"|format(credits.pct) }}%"></div>
+    </div>
+  {% else %}
+    <p class="muted">Vizard credits this month: <strong>{{ credits.used }}</strong>
+      (no cap set — set <code>CLIPSCORE_MONTHLY_CAP_CREDITS</code> to track a budget)</p>
+  {% endif %}
+</div>
+<style>
+  .credits { margin: 0 0 1rem; }
+  .credit-bar { height: 8px; max-width: 320px; background: #e6ecee; border-radius: 6px; overflow: hidden; }
+  .credit-bar-fill { height: 100%; background: #0e8f85; border-radius: 6px; }
+  .credit-bar-fill.warn { background: #b26a00; }
+  .credit-bar-fill.danger { background: #c02a2a; }
+  @media (prefers-color-scheme: dark) {
+    .credit-bar { background: #222c31; }
+    .credit-bar-fill { background: #2dd4bf; }
+    .credit-bar-fill.warn { background: #eab24a; }
+    .credit-bar-fill.danger { background: #f0888a; }
+  }
+</style>
 <table>
   <tr><th>Campaign</th><th>Niche</th><th>CVS %ile</th><th>Est. cost</th><th></th></tr>
   {% for r in rows %}
