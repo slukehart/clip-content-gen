@@ -11,6 +11,7 @@ after `pip install -e .` these are real terminal commands:
     clipscore extract   # one incremental Pipeline B enrich_batch sweep (only_stale)
     clipscore extract --report   # OPERATOR-RUN: full coverage spike report (needs LLM key)
     clipscore clip <campaign_id> [--source-type T] [--source-ref R]   # queue a clip-factory job
+    clipscore process [--once]   # run in-flight clip jobs to completion
 
 The configured DB is CLIPSCORE_DB_URL (see config.Settings). `setup` uses the ORM
 metadata directly; production schema upgrades still go through `alembic upgrade head`.
@@ -87,6 +88,13 @@ def _clip(args) -> None:
         print(f"queued clip job {job.id} (status={job.status})")
 
 
+def _process(args) -> None:
+    get_engine()
+    from clipscore.jobs.drain import drain_clip_jobs
+    with SessionLocal() as s:
+        print(drain_clip_jobs(s, get_settings(), once=args.once))
+
+
 def _prune(args) -> None:
     get_engine()
     from clipscore.factory.clip.retention import sweep_clip_retention
@@ -130,6 +138,10 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("--source-minutes", dest="source_minutes", type=int, default=None,
                     help="source video length in minutes (feeds the monthly credit cap)")
     cp.set_defaults(fn=_clip)
+
+    pp = sub.add_parser("process", help="run in-flight clip jobs to completion (drain)")
+    pp.add_argument("--once", action="store_true", help="single pass instead of draining to terminal")
+    pp.set_defaults(fn=_process)
 
     sub.add_parser("prune", help="delete clip files older than CLIPSCORE_CLIP_RETENTION_DAYS").set_defaults(fn=_prune)
 
