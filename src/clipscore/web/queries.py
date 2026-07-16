@@ -17,6 +17,7 @@ _CLIPPING = ("clipping", "both")
 class ApprovalRow(BaseModel):
     campaign_id: str
     title: str | None = None
+    url: str | None = None
     niche: str | None = None
     campaign_type: str | None = None
     cvs_niche_percentile: float | None = None
@@ -59,6 +60,19 @@ def _latest_job_status(session: Session, campaign_id: str) -> str | None:
     return session.get(ClipJob, jid).status
 
 
+def _campaign_link(settings: Settings, camp) -> str | None:
+    """Per-campaign Whop deep link. Whop maps our stored `whop_product_route`
+    to the real community slug and resolves the experience, so
+    `{base}/{route}/{exp}/app/` lands on the specific campaign (verified
+    against live campaigns). Falls back to the stored community/discover `url`
+    when either id is missing."""
+    route = camp.whop_product_route
+    exp = camp.whop_experience_id
+    if route and exp:
+        return f"{settings.whop_base_url}/{route}/{exp}/app/"
+    return camp.url
+
+
 def approval_rows(session: Session, settings: Settings) -> list[ApprovalRow]:
     targets = settings.target_niche_set
     rows: list[ApprovalRow] = []
@@ -68,7 +82,8 @@ def approval_rows(session: Session, settings: Settings) -> list[ApprovalRow]:
         if targets and (camp.niche or "other").lower() not in targets:
             continue
         rows.append(ApprovalRow(
-            campaign_id=camp.id, title=camp.title, niche=camp.niche,
+            campaign_id=camp.id, title=camp.title, url=_campaign_link(settings, camp),
+            niche=camp.niche,
             campaign_type=camp.campaign_type,
             cvs_niche_percentile=score.cvs_niche_percentile,
             est_cost_usd=settings.clip_est_cost_usd,

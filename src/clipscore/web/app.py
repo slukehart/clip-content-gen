@@ -51,8 +51,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         })
 
     @app.post("/clip/{campaign_id}", response_class=HTMLResponse)
-    def clip(campaign_id: str, request: Request, db: Session = Depends(get_db)):
-        result = actions.clip_this(db, campaign_id, settings)
+    def clip(campaign_id: str, request: Request, db: Session = Depends(get_db),
+             source_ref: str = Form("")):
+        result = actions.clip_this(db, campaign_id, settings, source_ref=source_ref or None)
         return templates.TemplateResponse(request, "_clip_button.html", {
             "campaign_id": campaign_id, "result": result,
         })

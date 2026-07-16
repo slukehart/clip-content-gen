@@ -36,7 +36,7 @@
   <tr><th>Campaign</th><th>Niche</th><th>CVS %ile</th><th>Est. cost</th><th></th></tr>
   {% for r in rows %}
   <tr>
-    <td>{{ r.title or r.campaign_id }}</td>
+    <td>{% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.title or r.campaign_id }}</a>{% else %}{{ r.title or r.campaign_id }}{% endif %}</td>
     <td>{{ r.niche or "" }}</td>
     <td>{{ "%.2f"|format(r.cvs_niche_percentile) if r.cvs_niche_percentile is not none else "—" }}</td>
     <td>${{ "%.2f"|format(r.est_cost_usd) }}</td>

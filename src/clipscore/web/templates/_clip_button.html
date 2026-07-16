@@ -8,12 +8,12 @@
     <span class="warn">{{ res.error }}</span>
   {% elif jstatus %}
     <span class="muted">{{ jstatus }}</span>
-  {% elif r is defined and not r.clippable %}
-    <span class="warn">no acquirable source</span>
   {% else %}
     <form hx-post="/clip/{{ cid }}" hx-target="#clip-{{ cid }}" hx-swap="outerHTML"
           method="post" action="/clip/{{ cid }}">
-      <button type="submit">Clip this</button>
+      <input type="url" name="source_ref" size="24"
+             placeholder="{% if r is defined and r.clippable %}source URL (optional){% else %}paste source video URL{% endif %}">
+      <button type="submit">Clip</button>
     </form>
   {% endif %}
 </div>

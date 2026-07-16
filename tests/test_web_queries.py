@@ -22,7 +22,7 @@ def test_approval_rows_filters_and_sorts(session):
     _camp(session, "a", "clipping", pct=0.4)
     _camp(session, "b", "both", pct=0.9)
     _camp(session, "u", "ugc", pct=0.99)          # excluded by eligible_latest_scores
-    rows = queries.approval_rows(session, Settings(clip_est_cost_usd=1.25))
+    rows = queries.approval_rows(session, Settings(_env_file=None, clip_est_cost_usd=1.25))
     ids = [r.campaign_id for r in rows]
     assert ids == ["b", "a"]                        # ugc dropped, sorted desc by pct
     assert rows[0].est_cost_usd == 1.25
@@ -34,7 +34,7 @@ def test_approval_row_job_status(session):
     session.add(ClipJob(campaign_id="a", source_type="campaign_provided", source_ref="x",
                         status="queued", created_at="2026-01-02T00:00:00Z"))
     session.commit()
-    rows = queries.approval_rows(session, Settings())
+    rows = queries.approval_rows(session, Settings(_env_file=None))
     assert rows[0].job_status == "queued"
 
 

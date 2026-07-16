@@ -5,7 +5,7 @@ from clipscore.web.app import create_app, get_db
 
 
 def _client(session):
-    app = create_app(Settings(clip_est_cost_usd=2.0))
+    app = create_app(Settings(_env_file=None, clip_est_cost_usd=2.0))
     def _override():
         yield session
     app.dependency_overrides[get_db] = _override
@@ -27,7 +27,7 @@ def test_approval_page_lists_campaigns(session):
     resp = _client(session).get("/")
     assert resp.status_code == 200
     assert "T a" in resp.text
-    assert "Clip this" in resp.text
+    assert 'name="source_ref"' in resp.text   # manual-source clip input renders
 
 
 def test_post_clip_enqueues(session):

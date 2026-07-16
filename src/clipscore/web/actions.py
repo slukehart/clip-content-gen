@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from clipscore.config import Settings
 from clipscore.db.models import Campaign, Clip, ClipMatch, Outcome
+from clipscore.factory.clip.videotype import detect_video_type
 from clipscore.jobs.clipfactory import create_clip_job
 from clipscore.time import utcnow_iso
 
@@ -20,9 +21,21 @@ class ClipResult(BaseModel):
     error: str | None = None
 
 
-def clip_this(session: Session, campaign_id: str, settings: Settings) -> ClipResult:
+def clip_this(session: Session, campaign_id: str, settings: Settings,
+              *, source_ref: str | None = None) -> ClipResult:
+    """Queue a clip job for a ranked campaign. If the operator pastes a
+    `source_ref` (the norm -- most campaigns expose no auto-discoverable
+    source), route it the same way create_clip_job routes a content_bank_url:
+    a Vizard-fetchable URL -> `passthrough` (no download), else
+    `campaign_provided` (direct download). With no `source_ref`, fall back to
+    create_clip_job's auto-resolution (content_bank_url / target_creator)."""
+    kwargs = {}
+    ref = (source_ref or "").strip()
+    if ref:
+        source_type = "passthrough" if detect_video_type(ref) is not None else "campaign_provided"
+        kwargs = {"source_type": source_type, "source_ref": ref}
     try:
-        job = create_clip_job(session, campaign_id, settings)
+        job = create_clip_job(session, campaign_id, settings, **kwargs)
     except ValueError as e:
         return ClipResult(ok=False, error=str(e))
     return ClipResult(ok=True, job_id=job.id, status=job.status)
