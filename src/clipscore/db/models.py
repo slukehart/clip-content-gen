@@ -123,6 +123,8 @@ class ClipJob(Base):
     source_ref: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String)
     est_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    est_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    credits_used: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[str] = mapped_column(String)
 
@@ -155,6 +157,7 @@ class Clip(Base):
 
 class ClipMatch(Base):
     __tablename__ = "clip_matches"
+    __table_args__ = (UniqueConstraint("clip_id", "campaign_id", name="uq_clipmatch_clip_campaign"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     clip_id: Mapped[int] = mapped_column(Integer, index=True)
     campaign_id: Mapped[str] = mapped_column(String, index=True)
