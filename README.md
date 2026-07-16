@@ -25,4 +25,9 @@ Python 3.11+ · SQLite (WAL) · SQLAlchemy 2.x + Alembic · APScheduler · httpx
 
 ## Status
 
-Design phase. See the two documents above for the full architecture, data model, phased build plans, and open risks. No implementation code yet.
+**Built and operational (2026-07-16).** Pipeline A (Stages 1–4) and Pipeline B (B1–B5) are
+merged; the real Vizard clip-engine integration is proven end-to-end. The full loop runs:
+ingest + rank campaigns → supply a source URL → produce clips (Vizard) → match + caption →
+review dashboard → post (manual) → track outcomes. See [`CLAUDE.md`](CLAUDE.md) for current
+status, the operating model, and how to run it; the two design docs above remain the
+architectural source of truth.

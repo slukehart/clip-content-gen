@@ -351,7 +351,8 @@ the fix is a *no-download passthrough*. Scope (build only this; defer the rest):
   `creditsUsed` cost.
 
 ### Phase B5 — Cost & retention hardening
-Design approved 2026-07-15 (brainstorm) after the real-Vizard acceptance run proved B4.5
+**MERGED 2026-07-16** (migration `0007`; `plans/pipeline-b-stage-5-cost-retention.md`).
+Designed 2026-07-15 (brainstorm) after the real-Vizard acceptance run proved B4.5
 and surfaced concrete gaps. Scope = "full hardening": monthly cost cap, persist raw
 `creditsUsed`, clip retention, an on-demand process command, Vizard virality params, and
 a batch of carried-over minor fixes. Vizard billing is now known exactly (see Open
@@ -410,6 +411,23 @@ alerts once; a posted clip's file is deleted and an aged clip is swept; `clipsco
 drives a queued job to terminal; the Vizard payload carries the virality params. (Manual)
 set `CLIPSCORE_MONTHLY_CAP_CREDITS` + `CLIPSCORE_VIZARD_USD_PER_CREDIT` from the real plan
 and confirm the cap blocks a would-be over-budget real run.
+
+### Post-B5 — dashboard usability (merged 2026-07-16)
+Small follow-ons that made the `clipscore web` board operable against the real
+manual-source-entry reality (no new schema; all CI-tested):
+- **Paste-a-source-URL to clip a ranked campaign.** Each board row has a source-URL input;
+  `actions.clip_this(..., source_ref=...)` routes it (Vizard-fetchable → `passthrough`, else
+  `campaign_provided`) onto the *existing* campaign. Replaces the old "no acquirable source"
+  dead-end. Blank + no auto-source still errors cleanly.
+- **Titles link to the per-campaign Whop deep link** — `queries._campaign_link` builds
+  `{whop_base}/{whop_product_route}/{whop_experience_id}/app/` (verified: Whop redirects the
+  stored route to the real community slug), so the title opens the *specific* campaign inside
+  its community, not the community hub. Falls back to the stored community `url` if either id
+  is missing.
+- **Credits-used-vs-cap readout** on the board (`queries.monthly_credit_status`) — bar turns
+  amber at 75% / red at 90% of `CLIPSCORE_MONTHLY_CAP_CREDITS`.
+- **Niche lane filter** (`CLIPSCORE_TARGET_NICHES`) restricts `rank` + the board to the
+  operator's lane; non-destructive (other niches stay in the DB); empty = all.
 
 ---
 
