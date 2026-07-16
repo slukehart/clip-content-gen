@@ -20,6 +20,7 @@ from clipscore.config import Settings
 class ClipSpec(BaseModel):
     min_len_s: int
     max_len_s: int
+    keyword: str | None = None
 
 
 class ProducedClip(BaseModel):
@@ -48,11 +49,12 @@ def derive_specs(campaign, settings: Settings) -> ClipSpec:
     Vizard picks the clips and their count; the window is advisory (used for
     `preferLength` and as a matching hint). Both bounds present -> use them;
     otherwise (0, 0) = 'no preference'."""
+    kw = (getattr(campaign, "niche", None) or "").strip() or None
     lo = getattr(campaign, "clip_min_len_s", None)
     hi = getattr(campaign, "clip_max_len_s", None)
     if lo is not None and hi is not None:
-        return ClipSpec(min_len_s=lo, max_len_s=hi)
-    return ClipSpec(min_len_s=0, max_len_s=0)
+        return ClipSpec(min_len_s=lo, max_len_s=hi, keyword=kw)
+    return ClipSpec(min_len_s=0, max_len_s=0, keyword=kw)
 
 
 class FakeClipEngine(BaseClipEngine):

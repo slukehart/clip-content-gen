@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     clip_est_cost_usd: float = 0.0
     vizard_usd_per_credit: float = 0.0
     monthly_cap_credits: int = 0  # 0 = uncapped; else block paid jobs projected over this in the ET month
+    vizard_ratio_of_clip: int = 1   # 1=9:16, 2=1:1, 3=4:5, 4=16:9
+    vizard_subtitle: bool = True
+    vizard_highlight: bool = True
+    vizard_headline: bool = True
+    vizard_emoji: bool = True
+    vizard_broll: bool = True
+    vizard_remove_silence: bool = True
 
 
 @lru_cache

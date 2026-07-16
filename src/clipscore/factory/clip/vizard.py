@@ -78,15 +78,25 @@ class VizardEngine(BaseClipEngine):
             raise RuntimeError(f"Vizard cannot fetch source by URL: {source_uri!r}")
         video_type, ext = detected
         with self._client() as client:
-            project_id = self._submit(client, source_uri, video_type, ext)
+            project_id = self._submit(client, source_uri, video_type, ext, spec)
             videos, credits_used = self._poll(client, project_id)
             return self._download(client, videos, credits_used, dest_dir=dest_dir)
 
-    def _submit(self, client, source_uri, video_type, ext):
+    def _submit(self, client, source_uri, video_type, ext, spec):
+        s = self.settings
         payload = {"videoUrl": source_uri, "videoType": video_type,
-                   "lang": "en", "preferLength": [0]}
+                   "lang": "en", "preferLength": [0],
+                   "ratioOfClip": s.vizard_ratio_of_clip,
+                   "subtitleSwitch": int(s.vizard_subtitle),
+                   "highlightSwitch": int(s.vizard_highlight),
+                   "headlineSwitch": int(s.vizard_headline),
+                   "emojiSwitch": int(s.vizard_emoji),
+                   "autoBrollSwitch": int(s.vizard_broll),
+                   "removeSilenceSwitch": int(s.vizard_remove_silence)}
         if video_type == 1:
             payload["ext"] = ext or "mp4"
+        if spec.keyword:
+            payload["keyword"] = spec.keyword
         resp = client.post("/project/create", json=payload)
         resp.raise_for_status()
         data = resp.json()

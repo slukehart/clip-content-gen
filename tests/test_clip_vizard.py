@@ -54,6 +54,29 @@ def test_produce_submits_videotype_polls_and_downloads(tmp_path):
     assert (tmp_path / "clip-0.mp4").read_bytes() == b"FAKEMP4"
 
 
+def test_produce_sends_virality_params(tmp_path):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/project/create"):
+            body = json.loads(request.content)
+            seen.update(body)
+            return httpx.Response(200, json={"code": 2000, "projectId": 7})
+        if "/project/query/" in request.url.path:
+            return httpx.Response(200, json={"code": 2000, "creditsUsed": 3,
+                                             "videos": [{"videoUrl": "https://cdn/v0.mp4",
+                                                         "videoMsDuration": 30000, "videoId": "v0"}]})
+        return httpx.Response(200, content=b"MP4")
+
+    eng = _engine(handler, tmp_path)
+    spec = ClipSpec(min_len_s=0, max_len_s=0, keyword="fitness")
+    eng.produce("https://youtu.be/abc", spec, dest_dir=str(tmp_path))
+    assert seen["ratioOfClip"] == 1
+    assert seen["subtitleSwitch"] == 1 and seen["headlineSwitch"] == 1
+    assert seen["removeSilenceSwitch"] == 1
+    assert seen["keyword"] == "fitness"
+
+
 def test_produce_raises_on_unsupported_source(tmp_path):
     def handler(request):  # should never be called
         raise AssertionError("no HTTP call expected")
