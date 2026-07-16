@@ -3,17 +3,25 @@ Within-niche screening board. cvs_niche_percentile is the signal; cvs_raw is an
 internal scalar shown for debugging, NEVER a $/hr promise."""
 import argparse
 from sqlalchemy.orm import Session
+from clipscore.config import get_settings
 from clipscore.scoring.board import eligible_latest_scores
 from clipscore.db.session import get_engine, SessionLocal
 
 CAVEAT = "estimated screening signal, not a payout prediction"
 
 
-def ranked_rows(session: Session, top: int | None = None, niche: str | None = None) -> list[dict]:
+def ranked_rows(session: Session, top: int | None = None, niche: str | None = None,
+                niches: frozenset[str] | set[str] | None = None) -> list[dict]:
+    """`niche` (singular, exact match) is the legacy per-call override.
+    `niches` is the configured lane -- a set of lowercased niche names; when
+    non-empty, only campaigns whose niche is in the set are kept. An empty/None
+    `niches` applies no lane filter."""
     rows = []
     for c, s in eligible_latest_scores(session):
         key = c.niche or "other"
         if niche is not None and key != niche:
+            continue
+        if niches and key.lower() not in niches:
             continue
         rows.append(dict(campaign_id=s.campaign_id, title=c.title, niche=key,
                          cpm_usd=c.cpm_usd, net_cpm=s.net_cpm,
@@ -51,8 +59,9 @@ def main(argv=None):
     ap.add_argument("--niche", type=str, default=None)
     args = ap.parse_args(argv)
     get_engine()
+    niches = None if args.niche else get_settings().target_niche_set
     with SessionLocal() as session:
-        print(format_table(ranked_rows(session, top=args.top, niche=args.niche)))
+        print(format_table(ranked_rows(session, top=args.top, niche=args.niche, niches=niches)))
 
 
 if __name__ == "__main__":

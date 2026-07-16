@@ -60,9 +60,12 @@ def _latest_job_status(session: Session, campaign_id: str) -> str | None:
 
 
 def approval_rows(session: Session, settings: Settings) -> list[ApprovalRow]:
+    targets = settings.target_niche_set
     rows: list[ApprovalRow] = []
     for camp, score in eligible_latest_scores(session):
         if camp.campaign_type not in _CLIPPING:
+            continue
+        if targets and (camp.niche or "other").lower() not in targets:
             continue
         rows.append(ApprovalRow(
             campaign_id=camp.id, title=camp.title, niche=camp.niche,
