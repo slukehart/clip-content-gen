@@ -53,7 +53,8 @@ def _manual_id(title: str, now: str) -> str:
 
 def create_manual_campaign(session: Session, *, title: str, niche: str | None,
                            content_bank_url: str | None, target_creator: str | None,
-                           settings: Settings, now: str | None = None) -> ClipResult:
+                           settings: Settings, est_minutes: int | None = None,
+                           now: str | None = None) -> ClipResult:
     now = now or utcnow_iso()
     cid = _manual_id(title, now)
     session.add(Campaign(
@@ -64,7 +65,7 @@ def create_manual_campaign(session: Session, *, title: str, niche: str | None,
     ))
     session.commit()
     try:
-        job = create_clip_job(session, cid, settings)
+        job = create_clip_job(session, cid, settings, est_minutes=est_minutes)
     except ValueError:
         return ClipResult(ok=True, job_id=None, error="campaign created; no acquirable source")
     return ClipResult(ok=True, job_id=job.id, status=job.status)

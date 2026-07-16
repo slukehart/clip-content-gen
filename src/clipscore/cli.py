@@ -79,6 +79,7 @@ def _clip(args) -> None:
             job = create_clip_job(
                 s, args.campaign_id, settings,
                 source_type=args.source_type, source_ref=args.source_ref,
+                est_minutes=args.source_minutes,
             )
         except ValueError as exc:
             print(f"could not queue clip job: {exc}")
@@ -119,6 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
     cp.add_argument("campaign_id")
     cp.add_argument("--source-type", dest="source_type", default=None)
     cp.add_argument("--source-ref", dest="source_ref", default=None)
+    cp.add_argument("--source-minutes", dest="source_minutes", type=int, default=None,
+                    help="source video length in minutes (feeds the monthly credit cap)")
     cp.set_defaults(fn=_clip)
 
     wp = sub.add_parser("web", help="run the local review dashboard")

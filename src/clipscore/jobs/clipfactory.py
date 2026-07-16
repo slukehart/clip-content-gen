@@ -52,7 +52,8 @@ def _as_list(raw) -> list:
 
 def create_clip_job(
     session: Session, campaign_id: str, settings: Settings, *,
-    source_type: str | None = None, source_ref: str | None = None, now: str | None = None,
+    source_type: str | None = None, source_ref: str | None = None,
+    est_minutes: int | None = None, now: str | None = None,
 ) -> ClipJob:
     """Resolve `campaign_id` (raises `ValueError` if unknown), pick a
     source (explicit args, else `content_bank_url`, else the first
@@ -83,6 +84,7 @@ def create_clip_job(
         source_ref=source_ref,
         status="queued",
         est_cost_usd=settings.clip_est_cost_usd,
+        est_minutes=est_minutes,
         created_at=now or utcnow_iso(),
     )
     session.add(job)

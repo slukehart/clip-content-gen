@@ -101,11 +101,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/manual", response_class=HTMLResponse)
     def manual_submit(request: Request, db: Session = Depends(get_db),
                       title: str = Form(...), niche: str = Form(""),
-                      content_bank_url: str = Form(""), target_creator: str = Form("")):
+                      content_bank_url: str = Form(""), target_creator: str = Form(""),
+                      source_minutes: str = Form("")):
+        est_minutes = int(source_minutes) if source_minutes.strip() else None
         result = actions.create_manual_campaign(
             db, title=title, niche=niche or None,
             content_bank_url=content_bank_url or None,
-            target_creator=target_creator or None, settings=settings,
+            target_creator=target_creator or None, est_minutes=est_minutes, settings=settings,
         )
         return templates.TemplateResponse("manual.html", {"request": request, "result": result})
 
