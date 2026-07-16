@@ -17,6 +17,7 @@ _CLIPPING = ("clipping", "both")
 class ApprovalRow(BaseModel):
     campaign_id: str
     title: str | None = None
+    url: str | None = None
     niche: str | None = None
     campaign_type: str | None = None
     cvs_niche_percentile: float | None = None
@@ -68,7 +69,7 @@ def approval_rows(session: Session, settings: Settings) -> list[ApprovalRow]:
         if targets and (camp.niche or "other").lower() not in targets:
             continue
         rows.append(ApprovalRow(
-            campaign_id=camp.id, title=camp.title, niche=camp.niche,
+            campaign_id=camp.id, title=camp.title, url=camp.url, niche=camp.niche,
             campaign_type=camp.campaign_type,
             cvs_niche_percentile=score.cvs_niche_percentile,
             est_cost_usd=settings.clip_est_cost_usd,
