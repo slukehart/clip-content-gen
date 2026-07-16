@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from clipscore.config import Settings
 from clipscore.db.models import Campaign, Clip, ClipJob, SourceAsset
 from clipscore.factory.clip.base import BaseClipEngine, build_engine, derive_specs
+from clipscore.factory.clip.cost import est_credits, month_credits_used
 from clipscore.time import utcnow_iso
 
 log = structlog.get_logger()
@@ -30,6 +31,17 @@ log = structlog.get_logger()
 def _run_clipping_inner(
     session: Session, clip_job: ClipJob, settings: Settings, engine: BaseClipEngine, now: str
 ) -> None:
+    cap = settings.monthly_cap_credits
+    if cap > 0:
+        projected = month_credits_used(session) + est_credits(clip_job.est_minutes)
+        if projected > cap:
+            clip_job.status = "blocked"
+            clip_job.error = f"monthly_cap_reached: projected {projected} credits > cap {cap}"
+            session.commit()
+            log.warning("clip_job_blocked_over_cap", clip_job_id=clip_job.id,
+                        projected=projected, cap=cap)
+            return
+
     source_asset = session.execute(
         select(SourceAsset).where(SourceAsset.clip_job_id == clip_job.id)
     ).scalars().one()
@@ -39,7 +51,7 @@ def _run_clipping_inner(
     ).scalars().one()
 
     spec = derive_specs(campaign, settings)
-    dest_dir = f"{settings.media_dir}/clips/{clip_job.id}"
+    dest_dir = os.path.join(settings.media_dir, "clips", str(clip_job.id))
     os.makedirs(dest_dir, exist_ok=True)
 
     produced = engine.produce(source_asset.source_url, spec, dest_dir=dest_dir)
@@ -72,6 +84,7 @@ def _run_clipping_inner(
                         storage_uri=source_asset.storage_uri)
         source_asset.storage_uri = None
 
+    clip_job.credits_used = produced[0].credits_used if produced else None
     clip_job.status = "produced"
     clip_job.error = None
     session.commit()

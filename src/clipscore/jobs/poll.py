@@ -51,4 +51,14 @@ def build_scheduler(session_factory) -> BackgroundScheduler:
                 # session-scoped settings).
                 log.error("clip_factory_tick_failed", exc_info=True)
     sched.add_job(clip_factory_job, "interval", minutes=minutes, id="clip_factory")
+
+    def retention_job():
+        with session_factory() as s:
+            try:
+                from clipscore.factory.clip.retention import sweep_clip_retention
+                result = sweep_clip_retention(s, get_settings())
+                log.info("clip_retention", **result)
+            except Exception:
+                log.error("clip_retention_tick_failed", exc_info=True)
+    sched.add_job(retention_job, "interval", minutes=minutes, id="clip_retention")
     return sched

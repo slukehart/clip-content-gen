@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     default_assumed_cap_usd: float = 500.0
     hours_per_clip: float = 0.75
     raw_retention_days: int = 14
+    clip_retention_days: int = 14  # age sweep for produced clip files (clips-only; passthrough keeps no source)
+    clip_jobs_per_tick: int = 5  # max clip jobs advanced per process_clip_jobs pass
     discord_token: str | None = None
     alert_percentile: float = 0.90
     min_niche_sample: int = 5
@@ -44,6 +46,14 @@ class Settings(BaseSettings):
     clip_poll_timeout_s: float = 1800.0
     clip_est_cost_usd: float = 0.0
     vizard_usd_per_credit: float = 0.0
+    monthly_cap_credits: int = 0  # 0 = uncapped; else block paid jobs projected over this in the ET month
+    vizard_ratio_of_clip: int = 1   # 1=9:16, 2=1:1, 3=4:5, 4=16:9
+    vizard_subtitle: bool = True
+    vizard_highlight: bool = True
+    vizard_headline: bool = True
+    vizard_emoji: bool = True
+    vizard_broll: bool = True
+    vizard_remove_silence: bool = True
 
 
 @lru_cache

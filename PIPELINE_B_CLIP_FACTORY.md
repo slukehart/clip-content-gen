@@ -351,7 +351,65 @@ the fix is a *no-download passthrough*. Scope (build only this; defer the rest):
   `creditsUsed` cost.
 
 ### Phase B5 — Cost & retention hardening
-`MONTHLY_CAP_USD` pause + alert; retention/cleanup jobs; disk guard. **Acceptance:** simulated spend nearing cap pauses new jobs and alerts; retention deletes aged assets. (Set the cap against the real `creditsUsed`→$ rate established in B4.5.)
+Design approved 2026-07-15 (brainstorm) after the real-Vizard acceptance run proved B4.5
+and surfaced concrete gaps. Scope = "full hardening": monthly cost cap, persist raw
+`creditsUsed`, clip retention, an on-demand process command, Vizard virality params, and
+a batch of carried-over minor fixes. Vizard billing is now known exactly (see Open
+questions + the `vizard-api-contract` memory): **1 credit = 1 minute of SOURCE video**,
+independent of clip count / `preferLength` / `lang`; there is **no API trim/duration
+parameter**, so the only lever to spend less is a shorter source. All new logic is
+CI-pure (fakes/MockTransport/in-memory DB); real Vizard stays manual-acceptance-only.
+
+**1. Monthly cost cap — in CREDITS (not USD).** The unit is credits, not dollars,
+because $/credit is plan-dependent and defaults to `0.0` (a dollar cap would silently
+never fire), whereas `creditsUsed` is exact and 1:1 with source minutes.
+- Config `CLIPSCORE_MONTHLY_CAP_CREDITS` (0 = uncapped). A $ figure is shown alongside
+  only when `vizard_usd_per_credit` is set.
+- **Estimate:** the operator enters source length in minutes (`/manual` form field +
+  `clipscore clip --source-minutes`); `est_credits = ceil(minutes)`, persisted on the
+  job. This is the estimate that feeds the monthly projection — there is **no** separate
+  per-job cap.
+- **Gate:** checked in `run_clipping`, immediately before the paid Vizard call (queue +
+  acquire stay free). If `month_credits_used + est_credits > cap`, the job transitions to
+  a new **`blocked`** status (distinct from `failed`), logs + alerts **once**, and never
+  calls Vizard. `blocked` is not in `_ADVANCEABLE_STATUSES`, so it is not retried; the
+  operator re-queues after raising the cap or at month rollover.
+- **Accounting (honest scoring):** the pre-flight estimate gates; the real `creditsUsed`
+  is what accumulates into the month-to-date total after a run. Month bounds reuse the
+  existing ET-month helper (`monthly_cost_usd` gains a credits sibling).
+
+**2. Persist raw `creditsUsed`.** New column `clip_jobs.credits_used` (raw int, one
+project = one job). `clips.cost_usd` stays derived (`credits × rate`, split across clips).
+
+**3. Retention — after-posted + age fallback (clips only; passthrough keeps no source).**
+- On mark-posted → delete that clip's file.
+- Age sweep → delete clips older than `CLIPSCORE_CLIP_RETENTION_DAYS` (default 14),
+  regardless of posted status.
+- Exposed as `clipscore prune` and wired into the scheduler (guarded — never crashes it).
+
+**4. On-demand process command.** `clipscore process` drains all in-flight jobs to a
+terminal status in one invocation (loops `process_clip_jobs` until nothing is
+advanceable); `--once` runs a single pass. This is the fix for the "web queues but
+nothing runs" gap — `clipscore web`/`clip` only enqueue.
+
+**5. Vizard virality params.** The adapter sends (all config-toggleable, sensible
+defaults on): `ratioOfClip=1` (9:16), `subtitleSwitch`, `highlightSwitch`,
+`headlineSwitch`, `emojiSwitch`, `autoBrollSwitch`, `removeSilenceSwitch`, and `keyword`
+derived from the campaign's niche/requirements. None affect credit cost. CI asserts the
+outgoing payload via MockTransport.
+
+**6. Carried-over minor fixes.** `clip_matches` UNIQUE(clip_id, campaign_id);
+`enrich_campaign` rollback-first alignment; per-tick job cap; `TemplateResponse` argument
+order (deprecation); `media//` double-slash path join.
+
+**Schema:** one small migration `0007` — `clip_jobs.est_minutes`, `clip_jobs.credits_used`,
+and the `clip_matches` unique constraint.
+
+**Acceptance:** (CI) a job whose estimate would exceed the cap is `blocked`, not sent, and
+alerts once; a posted clip's file is deleted and an aged clip is swept; `clipscore process`
+drives a queued job to terminal; the Vizard payload carries the virality params. (Manual)
+set `CLIPSCORE_MONTHLY_CAP_CREDITS` + `CLIPSCORE_VIZARD_USD_PER_CREDIT` from the real plan
+and confirm the cap blocks a would-be over-budget real run.
 
 ---
 

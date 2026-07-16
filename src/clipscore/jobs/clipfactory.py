@@ -33,6 +33,8 @@ from clipscore.time import utcnow_iso
 
 log = structlog.get_logger()
 
+# `blocked` (B5 monthly-credit cap) is intentionally excluded here: a
+# capped-out job stays parked until an operator re-queues it manually.
 _ADVANCEABLE_STATUSES = ("queued", "acquired", "produced")
 
 
@@ -50,7 +52,8 @@ def _as_list(raw) -> list:
 
 def create_clip_job(
     session: Session, campaign_id: str, settings: Settings, *,
-    source_type: str | None = None, source_ref: str | None = None, now: str | None = None,
+    source_type: str | None = None, source_ref: str | None = None,
+    est_minutes: int | None = None, now: str | None = None,
 ) -> ClipJob:
     """Resolve `campaign_id` (raises `ValueError` if unknown), pick a
     source (explicit args, else `content_bank_url`, else the first
@@ -81,6 +84,7 @@ def create_clip_job(
         source_ref=source_ref,
         status="queued",
         est_cost_usd=settings.clip_est_cost_usd,
+        est_minutes=est_minutes,
         created_at=now or utcnow_iso(),
     )
     session.add(job)
@@ -113,6 +117,7 @@ def process_clip_jobs(
     resolved_now = now or utcnow_iso()
     jobs = session.execute(
         select(ClipJob).where(ClipJob.status.in_(_ADVANCEABLE_STATUSES))
+        .limit(settings.clip_jobs_per_tick)
     ).scalars().all()
 
     advanced = 0

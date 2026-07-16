@@ -103,6 +103,7 @@ def enrich_campaign(session: Session, campaign: Campaign, settings: Settings,
     except Exception:
         log.error("enrich_campaign_failed_hard", campaign_id=getattr(campaign, "id", None))
         try:
+            session.rollback()
             regex_result = _regex_floor(campaign, None)
             apply_to_campaign(campaign, regex_result)
             session.commit()

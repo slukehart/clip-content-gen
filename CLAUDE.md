@@ -16,21 +16,29 @@ full pitch; the two design docs below are the source of truth for architecture.
   For approved campaigns, acquires source footage, sends it to a hosted clipping engine,
   matches finished clips back to live campaigns, and presents a local review dashboard.
 
-**Status (2026-07-15):** Pipeline A Stages 1–4 are merged. **Pipeline B Stages B1–B4 are
+**Status (2026-07-15):** Pipeline A Stages 1–4 are merged. **Pipeline B Stages B1–B4.5 are
 merged** — B1 (schema + LLM extraction), B2 (acquisition), B3 (clip production + matching +
-captions), B4 (FastAPI review dashboard, `clipscore web`). The full `queued→ready` lifecycle
-runs end-to-end on the CI `FakeClipEngine`. Remaining: **B5** (cost cap / retention
-hardening) and real-integration acceptance.
+captions), B4 (FastAPI review dashboard, `clipscore web`), B4.5 (Vizard passthrough bridge:
+rewritten adapter + `PassthroughAcquirer` + origin-campaign matching). **The real Vizard
+integration is now proven end-to-end** (manual-acceptance run 2026-07-15, see below).
+Remaining: **B5** (cost cap / retention hardening) and its associated hardening items.
 
-**Manual-acceptance findings (2026-07-15) — the real integrations are NOT yet proven:**
-- **The committed Vizard adapter (`factory/clip/vizard.py`) is wrong** and does not work
-  against the live API — it never sends the required `videoType`, polls the wrong
-  status codes, reads `clips` (real field is `videos`), and treats `preferLength` as
-  seconds. A live probe established the real contract; the next build is a **minimal
-  Vizard passthrough bridge** (send the public `source_url` + correct `videoType`
-  straight to the URL-only Vizard API; it returns N ranked vertical clips of its own
-  choosing, not one clip per spec). See `PIPELINE_B_CLIP_FACTORY.md` and the
-  `vizard-api-contract` memory.
+**Manual-acceptance run (2026-07-15) — real Vizard integration PROVEN:**
+- **The rewritten Vizard adapter (`factory/clip/vizard.py`, B4.5) works against the live
+  API.** A real run drove a manual `/manual` campaign through the full
+  `queued→acquired→produced→matched` lifecycle: the passthrough bridge sent a public
+  YouTube URL to the URL-only Vizard API (no local download, `storage_uri=None`), Vizard
+  returned **10 ranked vertical clips** (33–54s), all downloaded as valid MP4s, and every
+  clip matched its originating manual campaign at rank 1 with an `#ad` caption — confirming
+  the origin-always-matches fix fires on the real path even with no CVS score. The old
+  committed adapter's bugs (missing `videoType`, `clips`→`videos`, wrong poll codes) are
+  fixed. See the `vizard-api-contract` memory.
+- **Gaps this run exposed (feed B5):** (1) real `creditsUsed` is not persisted — `cost_usd`
+  is `creditsUsed × vizard_usd_per_credit`, and the raw count is lost when the rate is `0.0`
+  (default); persist raw `creditsUsed` + set `CLIPSCORE_VIZARD_USD_PER_CREDIT`. (2) There is
+  **no on-demand "process jobs" CLI** — `process_clip_jobs` only runs on the `bot`'s
+  interval scheduler, so `clipscore web`/`clipscore clip` only *queue* a job. (3) Cosmetic:
+  clip storage paths have a double slash (`media//clips/…`).
 - **Source-grabbing is inherently manual.** Real campaigns are dominantly "clip a source
   video" and the operator supplies the public source URL (via B4's `/manual`); extraction
   auto-discovers a content-bank URL for ~0% of campaigns (links are gated behind joining).
