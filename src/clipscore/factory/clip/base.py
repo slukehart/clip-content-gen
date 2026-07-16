@@ -30,6 +30,7 @@ class ProducedClip(BaseModel):
     engine: str
     engine_clip_id: str | None = None
     cost_usd: float | None = None
+    credits_used: int | None = None  # project-level creditsUsed (same on every clip of one run)
 
 
 class BaseClipEngine(ABC):
@@ -67,6 +68,7 @@ class FakeClipEngine(BaseClipEngine):
                 engine="fake",
                 engine_clip_id=f"fake-{i}",
                 cost_usd=0.0,
+                credits_used=0,
             )
             for i in range(3)
         ]

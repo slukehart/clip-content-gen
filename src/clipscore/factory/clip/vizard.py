@@ -138,5 +138,6 @@ class VizardEngine(BaseClipEngine):
                     engine="vizard",
                     engine_clip_id=str(clip.get("videoId")) if clip.get("videoId") else None,
                     cost_usd=per_clip_cost,
+                    credits_used=credits_used,
                 ))
         return produced

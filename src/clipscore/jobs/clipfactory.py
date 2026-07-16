@@ -33,6 +33,8 @@ from clipscore.time import utcnow_iso
 
 log = structlog.get_logger()
 
+# `blocked` (B5 monthly-credit cap) is intentionally excluded here: a
+# capped-out job stays parked until an operator re-queues it manually.
 _ADVANCEABLE_STATUSES = ("queued", "acquired", "produced")
 
 
